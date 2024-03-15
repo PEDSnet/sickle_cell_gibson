@@ -1,0 +1,12 @@
+concept_id,concept_name,concept_code,vocabulary_id
+4267147,Platelet count,61928009,SNOMED
+4192368,Platelet mean volume determination,75672003,SNOMED
+3034118,Platelets Large [Presence] in Blood by Light microscopy,32146-3,LOINC
+3043111,Platelet mean volume [Entitic volume] in Blood by Automated count,32623-1,LOINC
+3018528,Giant platelets [Presence] in Blood by Light microscopy,5908-9,LOINC
+3024386,Platelet mean volume [Entitic volume] in Blood by Rees-Ecker,776-5,LOINC
+3024929,Platelets [#/volume] in Blood by Automated count,777-3,LOINC
+3018291,Platelet Ab [Presence] in Serum,24375-8,LOINC
+3007461,Platelets [#/volume] in Blood,26515-7,LOINC
+3031586,Platelets [#/volume] in Blood by Estimate,49497-1,LOINC
+3033641,Platelet adequacy [Presence] in Blood by Light microscopy,9317-9,LOINC

@@ -1,4 +1,14 @@
 
+require(tidyr)
+require(knitr)
+require(kableExtra)
+require(stringr)
+require(tibble)
+require(ggplot2)
+require(table1)
+require(countmaskr)
+require(tidyverse)
+
 ##Summary Functions
 
 #Connect to a table outside the CDM
@@ -74,5 +84,47 @@ site_breakdown <- function(table_one){
   return(result)
 }
 
+# conditions counts
+concept_counts <- function(cohort, concept_name, concept_id){
+  cohort_ct <- cohort %>% distinct_ct()
+  if(("type" %in% colnames(cohort)) && ("site" %in% colnames(cohort))){ 
+    tbl <- cohort %>% group_by(site, type, {{concept_id}}, {{concept_name}}) %>%
+      summarize(persons = n_distinct(person_id), perc = round(n_distinct(person_id)/cohort_ct*100,2)) 
+  } else if(("type" %in% colnames(cohort))){
+    tbl <- cohort %>% group_by(type, {{concept_id}}, {{concept_name}}) %>%
+      summarize(persons = n_distinct(person_id), perc = round(n_distinct(person_id)/cohort_ct*100,2)) 
+  } else if(("site" %in% colnames(cohort))){
+    tbl <- cohort %>% group_by(site, {{concept_id}}, {{concept_name}}) %>%
+      summarize(persons = n_distinct(person_id), perc = round(n_distinct(person_id)/cohort_ct*100,2)) 
+  } else{
+    tbl <- cohort %>% group_by({{concept_id}}, {{concept_name}}) %>%
+      summarize(persons = n_distinct(person_id), perc = round(n_distinct(person_id)/cohort_ct*100,2)) 
+  }
+  
+  return(tbl)
+}
+
+get_codesets <- function(codeset_name) {
+  read_csv(paste0('../specs/', codeset_name, '.csv'), col_types = c('c', 'c', 'c', 'c'), show_col_types = FALSE) %>%
+  mutate(concept_id = as.character((concept_id)), concept_code = as.character((concept_code))) %>% collect()
+}
+
+get_results <- function(tbl_name) {
+  if (data_source == 'local') {
+    rslt <- read.csv(paste0('../local/', tbl_name, '.csv'))
+  }
+  else {
+    rslt <- results_tbl(tbl_name) %>% collect()
+  }
+  rslt
+}
+
+prettify_kable <- function(data) {
+  rslt <- data %>% kable(digits = 4, format.args = list(big.mark = ','))
+  if (knitr::is_html_output()) rslt <- rslt %>%
+      kable_styling(bootstrap_options = c("striped", "hover")) %>%
+      column_spec(1, bold = T, border_right = T)
+  rslt
+}
 
 

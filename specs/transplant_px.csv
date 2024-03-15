@@ -1,0 +1,46 @@
+﻿concept_id,concept_name,vocabulary_id,concept_code,type
+1524114,"Transfusion of Allogeneic Unrelated T-cell Depleted Hematopoietic Stem Cells into Peripheral Vein, Percutaneous Approach",ICD10PCS,30233U3,allogeneic
+1524115,"Transfusion of Allogeneic Related T-cell Depleted Hematopoietic Stem Cells into Peripheral Vein, Percutaneous Approach",ICD10PCS,30233U2,allogeneic
+1524120,"Transfusion of Allogeneic Unrelated T-cell Depleted Hematopoietic Stem Cells into Central Vein, Percutaneous Approach",ICD10PCS,30243U3,allogeneic
+1524121,"Transfusion of Allogeneic Related T-cell Depleted Hematopoietic Stem Cells into Central Vein, Percutaneous Approach",ICD10PCS,30243U2,allogeneic
+2002349,"Bone marrow transplant, not otherwise specified",ICD9Proc,41,other
+2002350,Autologous bone marrow transplant without purging,ICD9Proc,41.01,autologous
+2002351,Allogeneic bone marrow transplant with purging,ICD9Proc,41.02,allogeneic
+2002362,Allogeneic bone marrow transplant without purging,ICD9Proc,41.03,allogeneic
+2002363,Autologous hematopoietic stem cell transplant without purging,ICD9Proc,41.04,autologous
+2002364,Allogeneic hematopoietic stem cell transpant without purging,ICD9Proc,41.05,allogeneic
+2002365,Cord blood stem cell transplant,ICD9Proc,41.06,other
+2002366,Autologous hematopoietic stem cell transplant with purging,ICD9Proc,41.07,autologous
+2002367,Allogeneic hematopoietic stem cell transplant with purging,ICD9Proc,41.08,allogeneic
+2002368,Autologous bone marrow transplant with purging,ICD9Proc,41.09,autologous
+2788703,"Transfusion of Embryonic Stem Cells into Peripheral Vein, Percutaneous Approach",ICD10PCS,30233AZ,other
+2788704,"Transfusion of Autologous Bone Marrow into Peripheral Vein, Percutaneous Approach",ICD10PCS,30233G0,autologous
+2788732,"Transfusion of Autologous Cord Blood Stem Cells into Peripheral Vein, Percutaneous Approach",ICD10PCS,30233X0,autologous
+2788734,"Transfusion of Autologous Hematopoietic Stem Cells into Peripheral Vein, Percutaneous Approach",ICD10PCS,30233Y0,autologous
+2788926,"Transfusion of Embryonic Stem Cells into Central Vein, Open Approach",ICD10PCS,30240AZ,other
+2788957,"Transfusion of Autologous Hematopoietic Stem Cells into Central Vein, Open Approach",ICD10PCS,30240Y0,autologous
+2788959,"Transfusion of Embryonic Stem Cells into Central Vein, Percutaneous Approach",ICD10PCS,30243AZ,other
+2788960,"Transfusion of Autologous Bone Marrow into Central Vein, Percutaneous Approach",ICD10PCS,30243G0,autologous
+2788988,"Transfusion of Autologous Cord Blood Stem Cells into Central Vein, Percutaneous Approach",ICD10PCS,30243X0,autologous
+2789177,"Transfusion of Autologous Hematopoietic Stem Cells into Central Vein, Percutaneous Approach",ICD10PCS,30243Y0,autologous
+42897985,"Transfusion of Allogeneic Related Bone Marrow into Peripheral Vein, Open Approach",ICD10PCS,30230G2,allogeneic
+42897994,"Transfusion of Allogeneic Related Bone Marrow into Peripheral Vein, Percutaneous Approach",ICD10PCS,30233G2,allogeneic
+42897995,"Transfusion of Allogeneic Unrelated Bone Marrow into Peripheral Vein, Percutaneous Approach",ICD10PCS,30233G3,allogeneic
+42897996,"Transfusion of Allogeneic Unspecified Bone Marrow into Peripheral Vein, Percutaneous Approach",ICD10PCS,30233G4,allogeneic
+42897998,"Transfusion of Allogeneic Unrelated Cord Blood Stem Cells into Peripheral Vein, Percutaneous Approach",ICD10PCS,30233X3,allogeneic
+42897999,"Transfusion of Allogeneic Unspecified Cord Blood Stem Cells into Peripheral Vein, Percutaneous Approach",ICD10PCS,30233X4,allogeneic
+42898000,"Transfusion of Allogeneic Related Hematopoietic Stem Cells into Peripheral Vein, Percutaneous Approach",ICD10PCS,30233Y2,allogeneic
+42898001,"Transfusion of Allogeneic Unrelated Hematopoietic Stem Cells into Peripheral Vein, Percutaneous Approach",ICD10PCS,30233Y3,allogeneic
+42898002,"Transfusion of Allogeneic Unspecified Hematopoietic Stem Cells into Peripheral Vein, Percutaneous Approach",ICD10PCS,30233Y4,allogeneic
+42898003,"Transfusion of Allogeneic Related Bone Marrow into Central Vein, Open Approach",ICD10PCS,30240G2,allogeneic
+42898009,"Transfusion of Allogeneic Related Hematopoietic Stem Cells into Central Vein, Open Approach",ICD10PCS,30240Y2,allogeneic
+42898011,"Transfusion of Allogeneic Unrelated Hematopoietic Stem Cells into Central Vein, Open Approach",ICD10PCS,30240Y3,allogeneic
+42898013,"Transfusion of Allogeneic Related Bone Marrow into Central Vein, Percutaneous Approach",ICD10PCS,30243G2,allogeneic
+42898014,"Transfusion of Allogeneic Unrelated Bone Marrow into Central Vein, Percutaneous Approach",ICD10PCS,30243G3,allogeneic
+42898015,"Transfusion of Allogeneic Unspecified Bone Marrow into Central Vein, Percutaneous Approach",ICD10PCS,30243G4,allogeneic
+42898016,"Transfusion of Allogeneic Related Cord Blood Stem Cells into Central Vein, Percutaneous Approach",ICD10PCS,30243X2,allogeneic
+42898017,"Transfusion of Allogeneic Unrelated Cord Blood Stem Cells into Central Vein, Percutaneous Approach",ICD10PCS,30243X3,allogeneic
+42898018,"Transfusion of Allogeneic Unspecified Cord Blood Stem Cells into Central Vein, Percutaneous Approach",ICD10PCS,30243X4,allogeneic
+42898019,"Transfusion of Allogeneic Related Hematopoietic Stem Cells into Central Vein, Percutaneous Approach",ICD10PCS,30243Y2,allogeneic
+42898020,"Transfusion of Allogeneic Unrelated Hematopoietic Stem Cells into Central Vein, Percutaneous Approach",ICD10PCS,30243Y3,allogeneic
+42898021,"Transfusion of Allogeneic Unspecified Hematopoietic Stem Cells into Central Vein, Percutaneous Approach",ICD10PCS,30243Y4,allogeneic

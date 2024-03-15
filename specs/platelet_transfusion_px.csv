@@ -1,0 +1,21 @@
+concept_id,concept_name,concept_code,vocabulary_id
+725077,"Human Platelet Antigen 15 genotyping (HPA-15), CD109 (CD109 molecule) (eg, neonatal alloimmune thrombocytopenia [NAIT], post-transfusion purpura), gene analysis, common variant, HPA-15a/b (S682Y)",81112,CPT4
+725070,"Human Platelet Antigen 1 genotyping (HPA-1), ITGB3 (integrin, beta 3 [platelet glycoprotein IIIa], antigen CD61 [GPIIIa]) (eg, neonatal alloimmune thrombocytopenia [NAIT], post-transfusion purpura), gene analysis, common variant, HPA-1a/b (L33P)",81105,CPT4
+725071,"Human Platelet Antigen 2 genotyping (HPA-2), GP1BA (glycoprotein Ib [platelet], alpha polypeptide [GPIba]) (eg, neonatal alloimmune thrombocytopenia [NAIT], post-transfusion purpura), gene analysis, common variant, HPA-2a/b (T145M)",81106,CPT4
+725072,"Human Platelet Antigen 3 genotyping (HPA-3), ITGA2B (integrin, alpha 2b [platelet glycoprotein IIb of IIb/IIIa complex], antigen CD41 [GPIIb]) (eg, neonatal alloimmune thrombocytopenia [NAIT], post-transfusion purpura), gene analysis, common variant, HPA-",81107,CPT4
+725073,"Human Platelet Antigen 4 genotyping (HPA-4), ITGB3 (integrin, beta 3 [platelet glycoprotein IIIa], antigen CD61 [GPIIIa]) (eg, neonatal alloimmune thrombocytopenia [NAIT], post-transfusion purpura), gene analysis, common variant, HPA-4a/b (R143Q)",81108,CPT4
+725074,"Human Platelet Antigen 5 genotyping (HPA-5), ITGA2 (integrin, alpha 2 [CD49B, alpha 2 subunit of VLA-2 receptor] [GPIa]) (eg, neonatal alloimmune thrombocytopenia [NAIT], post-transfusion purpura), gene analysis, common variant (eg, HPA-5a/b [K505E])",81109,CPT4
+725075,"Human Platelet Antigen 6 genotyping (HPA-6w), ITGB3 (integrin, beta 3 [platelet glycoprotein IIIa, antigen CD61] [GPIIIa]) (eg, neonatal alloimmune thrombocytopenia [NAIT], post-transfusion purpura), gene analysis, common variant, HPA-6a/b (R489Q)",81110,CPT4
+725076,"Human Platelet Antigen 9 genotyping (HPA-9w), ITGA2B (integrin, alpha 2b [platelet glycoprotein IIb of IIb/IIIa complex, antigen CD41] [GPIIb]) (eg, neonatal alloimmune thrombocytopenia [NAIT], post-transfusion purpura), gene analysis, common variant, HPA",81111,CPT4
+4130829,Platelet transfusion,12719002,SNOMED
+2788978,"Transfusion of Autologous Platelets into Central Vein, Percutaneous Approach",30243R0,ICD10PCS
+2788722,"Transfusion of Autologous Platelets into Peripheral Vein, Percutaneous Approach",30233R0,ICD10PCS
+2789483,"Transfusion of Nonautologous Platelets into Central Artery, Percutaneous Approach (Deprecated)",30263R1,ICD10PCS
+2788946,"Transfusion of Nonautologous Platelets into Central Vein, Open Approach",30240R1,ICD10PCS
+2788979,"Transfusion of Nonautologous Platelets into Central Vein, Percutaneous Approach",30243R1,ICD10PCS
+2789198,"Transfusion of Nonautologous Platelets into Peripheral Artery, Open Approach (Deprecated)",30250R1,ICD10PCS
+2789230,"Transfusion of Nonautologous Platelets into Peripheral Artery, Percutaneous Approach (Deprecated)",30253R1,ICD10PCS
+2788690,"Transfusion of Nonautologous Platelets into Peripheral Vein, Open Approach",30230R1,ICD10PCS
+2788723,"Transfusion of Nonautologous Platelets into Peripheral Vein, Percutaneous Approach",30233R1,ICD10PCS
+2785933,"Transfusion of Nonautologous Platelets into Products of Conception, Circulatory, Percutaneous Approach",30273R1,ICD10PCS
+2008239,Transfusion of platelets,99.05,ICD9Proc

@@ -97,7 +97,7 @@ distinct_ct <- function(rs, id_col = 'person_id') {
   # A little clunky, but n_distinct() doesn't support quoting of
   # identifiers to the DBMS
   rs %>% select(all_of(id_col)) %>% distinct() %>%
-    summarize(dist_ct = n()) %>% pull(dist_ct)
+    summarise(dist_ct = n()) %>% pull(dist_ct)
 }
 
 #' Create a sequence with which to replace IDs
