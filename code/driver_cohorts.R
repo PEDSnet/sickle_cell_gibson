@@ -29,21 +29,6 @@ source("site/run.R")
                 persons = distinct_ct(rslt$scd_cohort))
     rslt$scd_cohort %>% output_tbl(name = "scd_dx", indexes = list('person_id'), local = FALSE, results_tag = FALSE)
     
-    # transplant patients
-    # type = "all" means both allogeneic and autologous transplants
-    rslt$transplant_cohort <- find_transplants("transplant_px") 
-    
-    append_sum(cohort = 'transplant_px',
-                persons = distinct_ct(rslt$transplant_cohort))
-
-    # filter out patients with multiple transplants that are not identifiable 
-    # rslt$transplant_cohort <- rslt$transplant_cohort %>%
-    #                                 anti_join(read.csv("local/multi_transplants_patid.csv"), by = c("person_id")) %>%
-    #                                 inner_join(read.csv("local/transplant_patid.csv") %>% 
-    #                                             mutate(transplant_date = as.Date(transplant_date)), 
-    #                                             by = c("person_id", "procedure_occurrence_id"= "transplant_occurrence_id", "transplant_date"))
-    rslt$transplant_cohort %>% output_tbl(name = "no_multi_transplant_px", indexes = list('person_id'), local = FALSE, results_tag = FALSE)
-
     rslt$mri_cohort <- find_procedures("mri_px") %>% 
                         rename(mri_concept_id = procedure_concept_id, 
                                mri_concept_name = procedure_concept_name, 
@@ -125,9 +110,9 @@ source("site/run.R")
                                                                 procedure_date = ferritin_date,
                                                                 end_date = as.Date("2022-12-31"),
                                                                 is_pre = FALSE, 
-                                                                cut_off = cut_off, min_days = 180) 
+                                                                cut_off = cut_off, min_days = 180)  %>% collect()
     append_sum(cohort = 'aim_2b_2', persons = distinct_ct(rslt$aim_2b_2_cohort))
-    rslt$aim_2b_2_cohort %>% collect() %>% output_tbl(name = "aim_2b_2", indexes = list('person_id'))
+    rslt$aim_2b_2_cohort %>% output_tbl(name = "aim_2b_2", indexes = list('person_id'))
 
     # Aim 3: 
     # 1. Number of patients who had a phlebotomy procedure after date of transplant.
@@ -154,5 +139,4 @@ source("site/run.R")
 
     output_sum(name = "attrition", local = TRUE, file = TRUE)
 
-    # a few things that have not been doucle checked
 }

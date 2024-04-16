@@ -48,9 +48,6 @@ config_append('extra_packages', c())
              persons = distinct_ct(rslt$next_cohort))
 
 
-  more_functions_as_needed()
-
-
   # If needed, replace person_ids and write output
   pers_xwalk <- gen_xwalk(rslt$starter, 'person_id')
   output_tbl(new_id(rslt$starter, 'person_id', pers_xwalk, replace = TRUE),

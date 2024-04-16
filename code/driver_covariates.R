@@ -18,6 +18,7 @@ config_append('extra_packages', c())
 
 
   library(tidyr)
+  library(ggplot2)
   setup_pkgs() # Load runtime packages as specified above
 
   message('Starting execution with framework version ',
@@ -70,18 +71,20 @@ config_append('extra_packages', c())
   # check units and add type of measurement
   # the units are mostly cells per microliter, some are cells per cubic millimeter
   # exclude the ones with percent as unit
-#   rslt$CD348 %>% mutate(CDtype = case_when(#measurement_concept_id %in% c("3011412", "3022533") ~ "CD3",
-#                                 grepl("T4 helper", measurement_concept_name, ignore.case = TRUE) ~ "CD4",
-#                                 grepl("T8 suppressor", measurement_concept_name, ignore.case = TRUE) ~ "CD8",
-#                                 grepl("CD3 cells", measurement_concept_name, ignore.case = TRUE) ~ "CD3")) %>%
-#                 filter(!is.na(value_as_number), unit_concept_name != "percent") %>%
-#                 group_by(measurement_concept_id, measurement_concept_name, unit_concept_name, CDtype, range_high, range_low) %>% summarise(n = n()) %>% view()         
-
   rslt$CD348 %>% mutate(CDtype = case_when(grepl("T4 helper", measurement_concept_name, ignore.case = TRUE) ~ "CD4",
+                                grepl("CD4", measurement_concept_name, ignore.case = TRUE) ~ "CD4",
                                 grepl("T8 suppressor", measurement_concept_name, ignore.case = TRUE) ~ "CD8",
-                                grepl("CD3 cells", measurement_concept_name, ignore.case = TRUE) ~ "CD3")) %>%
+                                grepl("CD8", measurement_concept_name, ignore.case = TRUE) ~ "CD8",
+                                grepl("CD3 cells", measurement_concept_name, ignore.case = TRUE) ~ "CD3",
+                                grepl("CD3", measurement_concept_name, ignore.case = TRUE) ~ "CD3",
+                                TRUE ~ NA)) %>%
                                 filter(!is.na(value_as_number), unit_concept_name != "percent") %>%
-                                output_tbl(name = "covar_CD348_mx")
+                filter(!((measurement_concept_id == "3011412" & unit_concept_name == "No matching concept" & range_high < 100) |
+                        (measurement_concept_id == "3028167" & unit_concept_name == "No matching concept" & is.na(range_high) & is.na(range_low))|
+                        (measurement_concept_id == "3045450" & unit_concept_name == "No matching concept" & is.na(range_high) & is.na(range_low))|
+                        (measurement_concept_id == "3014037" & unit_concept_name == "No matching concept" & range_high <100) |
+                        (measurement_concept_id == "3045450" & unit_concept_name == "No information"  & is.na(range_high) & is.na(range_low)))) %>%
+                collect() %>% output_tbl(name = "covar_CD348_mx")
   append_sum(cohort = 'CD3-4-8_counts',
              persons = rslt$CD348 %>% distinct_ct())
 
@@ -94,8 +97,11 @@ config_append('extra_packages', c())
 #   rslt$IgM %>% group_by(measurement_concept_id, measurement_concept_name, unit_concept_name) %>% summarise(n = n()) %>% view()
   # everything matches to measurement_concept_id = 3028026 get units milligram per deciliter
   # for measurement_concept_id = 4164130 only take milligram per deciliter
-  rslt$IgM <- rslt$IgM %>% filter(measurement_concept_id %in% c(3028026, 4164130)) %>%
-                        output_tbl(name = "covar_IgM_mx")
+  rslt$IgM <- rslt$IgM %>% filter(measurement_concept_id %in% c(3028026, 4164130)) %>% 
+                                filter(!((unit_concept_name == "NA" & is.na(range_low)) | 
+                                        (measurement_concept_id == "3028026"& unit_concept_name == "No matching concept" & is.na(range_low))|
+                                        (unit_concept_name == "No information" & is.na(range_low)))) %>% collect() %>% 
+                                output_tbl(name = "covar_IgM_mx")
   append_sum(cohort = 'IgM',
                  persons = rslt$IgM %>% filter(measurement_concept_id %in% c(3028026, 4164130)) %>% distinct_ct())
 
@@ -106,18 +112,25 @@ config_append('extra_packages', c())
    rslt$ferritin_post <- get_outcome_measurements(cohort = results_tbl("study_cohorts") %>% filter(aim_2b_2 == TRUE), 
                                                                 mx_codeset = load_codeset("ferritin_lab"),
                                                                 is_pre = FALSE, is_closet = FALSE) 
-   rslt$ferritin <- rbind(rslt$ferritin_pre, rslt$ferritin_post)
-#    rslt$ferritin %>% view()
-
-   # everything matches to measurement_concept_id = 3004121, majority with units nanogram per milliliter
-   # assume missing units are nanogram per milliliter
-   # exclude 1 case with NA unit measurement_concept_id = 4176561
-#    rslt$ferritin %>% filter(measurement_concept_id == "3015242") %>% view()
-   rslt$ferritin %>% filter(measurement_concept_id != "4176561") %>% 
-                mutate(ferritin_level = case_when(value_as_number < 1000 ~ "low",
-                                                value_as_number >= 1000 & value_as_number <= 3000 ~ "moderate",
-                                                value_as_number > 3000 ~ "high")) %>%
-                output_tbl(name = "covar_ferritin_mx")                                                                
+   rslt$ferritin <- rbind(rslt$ferritin_pre %>% mutate(ferritin_type = "pre"), 
+                        rslt$ferritin_post %>% mutate(ferritin_type = "post")) %>% 
+                        pivot_longer(cols = c(aim_2a_2:aim_3_2), names_to = "aim", values_to = "which_aim") %>%
+                        filter(which_aim == TRUE) %>% 
+                        select(person_id, 
+                        transplant_date,
+                        aim,
+                        ferritin_date = measurement_date,
+                        ferritin = value_as_number,
+                        ferritin_type, 
+                        measurement_concept_id, measurement_concept_name, unit_concept_name, range_high, range_low) %>% 
+                        mutate(ferritin_level = case_when(ferritin < 1000 ~ "low",
+                                                ferritin >= 1000 & ferritin <= 3000 ~ "moderate",
+                                                ferritin > 3000 ~ "high",
+                                                TRUE ~ NA)) 
+   # majority with units nanogram per milliliter
+   # assume missing units are nanogram per milliliter  
+   # no unit conversion done                                              
+   rslt$ferritin %>% output_tbl(name = "covar_ferritin_mx")                                                            
    append_sum(cohort = 'covar_ferritin_px',
                      persons = rslt$ferritin %>% distinct_ct())
 
@@ -148,7 +161,7 @@ config_append('extra_packages', c())
    rslt$abdominal_ultrasound %>% output_tbl(name = "abdominal_ultrasound_px")
    rslt$bilirubin %>% output_tbl(name = "bilirubin_mx")
   
-  #select patients with defibrotide or (abdominal ultrasound and bilirubin > 2mg/L 3 days apart)
+  # select patients with defibrotide or (abdominal ultrasound and bilirubin > 2mg/L 3 days apart)
   # expecting many to many relationship because of multiple ultrasound per day and multiple bilirubin measurements per day
   rslt$bilirubin %>% filter(value_as_number> 2) %>%
                         arrange(person_id, measurement_date) %>% select(person_id, transplant_date, bilirubin = value_as_number, 
@@ -171,22 +184,22 @@ config_append('extra_packages', c())
   append_sum(cohort = 'defibrotide_drugs',
              persons = rslt$defibrotide %>% distinct_ct())
 
-#   rslt$blood_culture <- get_outcome_measurements(cohort = results_tbl("study_cohorts"), 
-#                                                 mx_codeset = load_codeset("blood_culture_mx"),
-#                                                 is_pre = FALSE, is_closet = FALSE) 
-#   # add organism name
-#   rslt$blood_culture %>% distinct(measurement_concept_id, measurement_concept_name) %>% 
-#                         output_tbl(name = "blood_culture_mx", file = TRUE, local = TRUE)
-#                         summarise(n = n()) %>% view()
-#   rslt$blood_culture %>% filter(grepl("detected", value_as_concept_name, ignore.case = TRUE),
-#                                 !grepl("not", value_as_concept_name, ignore.case = TRUE)) %>%
-#                         mutate(bactereamia = case_when(grepl("Enterobacter", value_as_concept_name, ignore.case = TRUE) ~ "enterobacteria",
-#                                                         grepl("pseudomonas aeruginosa", value_as_concept_name, ignore.case = TRUE) ~ "pseudomonas aeruginosa",
-#                                                         grepl("gram negative", value_as_concept_name, ignore.case = TRUE) ~ "gram negative",
-#                                                         grepl("Staphylococcus", value_as_concept_name, ignore.case = TRUE) ~ "staphylococcus",)) %>% select(person_id, bactereamia) %>%
-#                                 view()
-#   append_sum(cohort = 'blood_culture',
-#              persons = rslt$blood_culture %>% distinct_ct())
+  rslt$blood_culture <- get_outcome_measurements(cohort = results_tbl("study_cohorts"), 
+                                                mx_codeset = load_codeset("blood_culture_mx"),
+                                                is_pre = FALSE, is_closet = FALSE) 
+  rslt$blood_culture %>% group_by(value_as_concept_name) %>% summarise(n = n()) %>% view()
+  rslt$blood_culture %>% view()
+  rslt$blood_culture %>% filter(!is.na(value_as_concept_name), 
+                                value_as_concept_name != "No matching concept") %>% 
+                         mutate(bacteremia = case_when(grepl("Detected", value_as_concept_name, ignore.case = TRUE) ~ TRUE,
+                                                       grepl("Not detected", value_as_concept_name, ignore.case = TRUE) ~ FALSE,
+                                                       grepl("High", value_as_concept_name, ignore.case = TRUE) ~ TRUE,
+                                                       grepl("Negative", value_as_concept_name, ignore.case = TRUE) ~ FALSE,
+                                                       grepl("No growth", value_as_concept_name, ignore.case = TRUE) ~ FALSE,
+                                                       TRUE ~ NA), 
+                                bacteremia_date = measurement_date) %>% output_tbl(name = "covar_bacteremia_dx")
+  append_sum(cohort = 'blood_culture',
+             persons = rslt$blood_culture %>% distinct_ct())
  
   # atleast 60 days after ce_date
   rslt$ALT <- get_outcome_measurements(cohort = results_tbl("study_cohorts"), 
@@ -260,18 +273,56 @@ config_append('extra_packages', c())
                                         mx_codeset = load_codeset("neutrophils_mx"),
                                         is_pre = FALSE, is_closet = FALSE)   
     # check units
-    rslt$ANC %>% output_tbl(name = "covar_anc_mx_original")
-    rslt$ANC %>% filter(measurement_concept_id %in% c("3013650", "3017501", "3017732", "3038972")) %>% 
-        mutate(value_as_number = case_when(unit_concept_name == "Kelvin per microliter" ~ value_as_number * 1000,
-                                        unit_concept_name == "thousand per microliter" ~ value_as_number*1000,
-                                        unit_concept_name == "thousand per cubic millimeter" ~ value_as_number*1000,
-                                        unit_concept_name == "billion per liter" ~ value_as_number,
-                                        unit_concept_name == "cells per microliter" ~ value_as_number,
-                                        unit_concept_name == "per microliter" ~ value_as_number,
-                                        unit_concept_name == "microliter" ~ value_as_number,
-                                        unit_concept_name == "per cubic millimeter" ~ value_as_number,
-                                        TRUE ~ NA)) %>%
-        filter(!is.na(value_as_number)) %>% output_tbl(name = "covar_anc_mx")
+#     rslt$ANC %>% output_tbl(name = "covar_anc_mx_original")
+    rslt$ANC <- results_tbl("covar_anc_mx_original") %>% collect_new()
+
+    # all the records without information on measurement units are ways after transplant, could look at this later
+    rslt$ANC %>% filter(unit_concept_name == "No information", !is.na(value_as_number)) %>% 
+                        select(person_id, transplant_date, measurement_date, value_as_number, unit_concept_name) %>% 
+                        arrange(person_id, measurement_date) %>% view()
+    # check valid concepts 
+    rslt$ANC %>% distinct(measurement_concept_id, measurement_concept_name, unit_concept_name) %>% view()
+
+    # these are the ones to use
+    rslt$ANC %>% filter(measurement_concept_id %in% c("3013650", "3017501", "3017732", "3038972", "3015586", "3046321", "3018199"),
+                unit_concept_name != "No information", !is.na(value_as_number)) %>%
+                group_by(measurement_concept_id, 
+                                    measurement_concept_name, 
+                                    unit_concept_name,
+                                    range_high, range_low) %>% summarise(n = n()) %>% view()
+    # double check 3017732 and 3018199 and 3046321
+    # convert to cells/uL
+    rslt$ANC %>% filter(measurement_concept_id %in% c("3013650", "3017501", "3017732", "3038972", "3015586", "3046321", "3018199"),
+                        unit_concept_name != "No information",
+                        unit_concept_name != "percent", 
+                        !is.na(value_as_number)) %>%
+                mutate(ANC = case_when(unit_concept_name == "Kelvin per microliter" ~ value_as_number * 1000,
+                                                unit_concept_name == "thousand per microliter" ~ value_as_number*1000,
+                                                unit_concept_name == "thousand per cubic millimeter" ~ value_as_number*1000,
+                                                unit_concept_name == "billion per liter" ~ value_as_number*1000,
+                                                unit_concept_name == "cells per microliter" ~ value_as_number,
+                                                unit_concept_name == "per microliter" ~ value_as_number,
+                                                unit_concept_name == "microliter" ~ value_as_number,
+                                                unit_concept_name == "per cubic millimeter" ~ value_as_number,
+                                                unit_concept_name == "No matching concept" & measurement_concept_id == "3017732" ~ value_as_number * 1000,
+                                                TRUE ~ NA)) %>%
+                filter(!is.na(ANC)) %>% output_tbl(name = "covar_anc_mx")
+                
+    # double check a few abnormal cases:
+    # 3017501 & invalid range_high, range_low: checked
+    # measurement_concept_id == "3017732", unit_concept_name == "microliter": patients with very different 
+    rslt$ANC %>% filter(measurement_concept_id == "3017732", unit_concept_name == "microliter") %>% 
+                select(person_id, transplant_date, measurement_date, value_as_number, range_high, range_low) %>% 
+                arrange(person_id, transplant_date, measurement_date) %>% view()
+                
+
+    rslt$ANC %>% mutate(days = as.numeric(difftime(measurement_date, transplant_date, units = "days"))) %>%
+                ggplot(aes(x = days, y = value_as_number)) + geom_point() + facet_wrap(~person_id) + theme_minimal() 
+
+    # plot on multiple pages and export to pdf
+        rslt$ANC %>% mutate(days = as.numeric(difftime(measurement_date, transplant_date, units = "days"))) %>%
+                        ggplot(aes(x = days, y = value_as_number)) + geom_point() + facet_wrap(~person_id) + theme_minimal() + 
+                        ggsave("ANC_plot.pdf", device = "pdf", width = 8, height = 8, units = "in", dpi = 300)
     # calculate ANC engraftment date
     # anc_date is the first of 3 consecutive days with ANC >= 500 after nadir
     nadir <- 7 

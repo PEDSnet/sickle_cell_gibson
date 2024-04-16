@@ -13,10 +13,10 @@ config('title',
 config('requester_name', 'Nora Gibson')
 config('requester_site', 'CHOP')
 config('cdm', 'pedsnet_dcc_v51')
-config('cdm_version', 1)
+config('cdm_version', 5.1)
 config('enqueued_date', as.Date('2024-01-23'))
 
-config('req_version', 1)
+config('req_version', 1.0)
 config('req_basename', 'sickle_cell_Gibson')
 
 # In most cases, these assignments should not need to be changed.

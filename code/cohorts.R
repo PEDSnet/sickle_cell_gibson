@@ -55,9 +55,9 @@ find_transplants <- function(procedure_codeset_name){
                           transplant_date = procedure_date, 
                           transplant_occurrence_id = procedure_occurrence_id,
                           transplant_site = site) %>%
-            mutate(transplant_type = case_when(grepl("autologous",transplant_concept_name) ~ "autologous",
-                                                grepl("allogeneic",transplant_concept_name) ~ "allogeneic",
-                                                TRUE ~ "other")) 
+            mutate(transplant_type = case_when(grepl("autologous",transplant_concept_name, ignore.case = TRUE) ~ "autologous",
+                                                grepl("allogeneic",transplant_concept_name, ignore.case = TRUE) ~ "allogeneic",
+                                                TRUE ~ "unknown")) 
                                                                                  
     # find all patients with at least 2 transplants, filter out case when procedures outside visit windows 
     # group by visit, if the difference between 2 transplants is 1 day, then we'll take the 2nd one as the ce_date assuming that the first one
@@ -105,10 +105,10 @@ find_transplants <- function(procedure_codeset_name){
       # let's just discard these patients
     invalid_patid <- t %>% filter(transplant_count > 2) %>% select(person_id)
 
-    tbl <- tbl %>% inner_join(valid_patid, by = c("person_id", "transplant_occurrence_id", "transplant_date")) %>% 
+    tbl_valid <- tbl %>% inner_join(valid_patid, by = c("person_id", "transplant_occurrence_id", "transplant_date")) %>% 
                 anti_join(invalid_patid, by = c("person_id"))
 
-    return(tbl)
+    return(list(tbl_valid, tbl %>% inner_join(invalid_patid, by = c("person_id"))))
 }
 
 find_phleb <- function(){

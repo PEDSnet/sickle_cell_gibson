@@ -59,7 +59,7 @@ setup_pkgs <- function(pkgs = config('extra_packages')) {
     for (fn in list.files(file.path(here, config('subdirs')$code_dir),
                         'util_.+\\.R', full.names = TRUE))
       source(fn)
-     for (fn in list.files(file.path(here, config('subdirs')$code_dir),
+    for (fn in list.files(file.path(here, config('subdirs')$code_dir),
                         'addon_.+\\.R', full.names = TRUE))
       source(fn)
     for (fn in list.files(file.path(here, config('subdirs')$code_dir),
