@@ -184,20 +184,18 @@ config_append('extra_packages', c())
   append_sum(cohort = 'defibrotide_drugs',
              persons = rslt$defibrotide %>% distinct_ct())
 
-  rslt$blood_culture <- get_outcome_measurements(cohort = results_tbl("study_cohorts"), 
-                                                mx_codeset = load_codeset("blood_culture_mx"),
-                                                is_pre = FALSE, is_closet = FALSE) 
-  rslt$blood_culture %>% group_by(value_as_concept_name) %>% summarise(n = n()) %>% view()
+  rslt$blood_culture <- get_outcome_organism(cohort=results_tbl("study_cohorts"),
+                                     lab_tbl=cdm_tbl("measurement_organism"),
+                                     mx_codeset = NULL,
+                                     min_days = 0,
+                                     max_days = 365,
+                                     is_pre = FALSE,
+                                     is_closet = TRUE) 
+  rslt$blood_culture %>% filter(specimen_source_value != "Urine|Unknown (Blood)", 
+                                !grepl("yeast", organism_concept_name, ignore.case = TRUE)) %>% 
+                                output_tbl(name = "covar_bacteremia_dx", local = TRUE, file = TRUE)
+
   rslt$blood_culture %>% view()
-  rslt$blood_culture %>% filter(!is.na(value_as_concept_name), 
-                                value_as_concept_name != "No matching concept") %>% 
-                         mutate(bacteremia = case_when(grepl("Detected", value_as_concept_name, ignore.case = TRUE) ~ TRUE,
-                                                       grepl("Not detected", value_as_concept_name, ignore.case = TRUE) ~ FALSE,
-                                                       grepl("High", value_as_concept_name, ignore.case = TRUE) ~ TRUE,
-                                                       grepl("Negative", value_as_concept_name, ignore.case = TRUE) ~ FALSE,
-                                                       grepl("No growth", value_as_concept_name, ignore.case = TRUE) ~ FALSE,
-                                                       TRUE ~ NA), 
-                                bacteremia_date = measurement_date) %>% output_tbl(name = "covar_bacteremia_dx")
   append_sum(cohort = 'blood_culture',
              persons = rslt$blood_culture %>% distinct_ct())
  
@@ -273,7 +271,7 @@ config_append('extra_packages', c())
                                         mx_codeset = load_codeset("neutrophils_mx"),
                                         is_pre = FALSE, is_closet = FALSE)   
     # check units
-#     rslt$ANC %>% output_tbl(name = "covar_anc_mx_original")
+    # rslt$ANC %>% output_tbl(name = "covar_anc_mx_original")
     rslt$ANC <- results_tbl("covar_anc_mx_original") %>% collect_new()
 
     # all the records without information on measurement units are ways after transplant, could look at this later
@@ -307,22 +305,19 @@ config_append('extra_packages', c())
                                                 unit_concept_name == "No matching concept" & measurement_concept_id == "3017732" ~ value_as_number * 1000,
                                                 TRUE ~ NA)) %>%
                 filter(!is.na(ANC)) %>% output_tbl(name = "covar_anc_mx")
-                
+    
+    rslt$ANC <- results_tbl("covar_anc_mx") %>% collect_new()
     # double check a few abnormal cases:
     # 3017501 & invalid range_high, range_low: checked
     # measurement_concept_id == "3017732", unit_concept_name == "microliter": patients with very different 
     rslt$ANC %>% filter(measurement_concept_id == "3017732", unit_concept_name == "microliter") %>% 
                 select(person_id, transplant_date, measurement_date, value_as_number, range_high, range_low) %>% 
                 arrange(person_id, transplant_date, measurement_date) %>% view()
-                
-
-    rslt$ANC %>% mutate(days = as.numeric(difftime(measurement_date, transplant_date, units = "days"))) %>%
-                ggplot(aes(x = days, y = value_as_number)) + geom_point() + facet_wrap(~person_id) + theme_minimal() 
 
     # plot on multiple pages and export to pdf
-        rslt$ANC %>% mutate(days = as.numeric(difftime(measurement_date, transplant_date, units = "days"))) %>%
-                        ggplot(aes(x = days, y = value_as_number)) + geom_point() + facet_wrap(~person_id) + theme_minimal() + 
-                        ggsave("ANC_plot.pdf", device = "pdf", width = 8, height = 8, units = "in", dpi = 300)
+    rslt$ANC %>% mutate(days = as.numeric(difftime(measurement_date, transplant_date, units = "days"))) %>%
+                        ggplot(aes(x = days, y = value_as_number)) + geom_point() + facet_wrap(~person_id) + theme_minimal()
+    ggsave("ANC_plot.pdf", device = "pdf", width = 8, height = 8, units = "in", dpi = 300)
     # calculate ANC engraftment date
     # anc_date is the first of 3 consecutive days with ANC >= 500 after nadir
     nadir <- 7 
@@ -341,160 +336,7 @@ config_append('extra_packages', c())
                 select(-anc_day, -val_ct) %>%
                 output_tbl("covar_anc_engraftment_mx")
 
-   rslt$platelet <- get_outcome_measurements(cohort = results_tbl("study_cohorts"), 
-                                                mx_codeset = load_codeset("platelet_mx"),
-                                                is_pre = FALSE, is_closet = FALSE) 
-        #   rslt$platelet %>% view()   
-        # check units
-        # thousand per microliter = per cubic millimeter = Kelvin per microliter (this K actually means thousands)
-        # for measurement_concept_id = 3007461 with different ranges, it seems like we could ignore them because 
-        # some of the high ranges are not relevant. e.g no values between 300 and 750
-        # exclude the entitic volume as it measures the volume rather than the counts
-
-        #   results_tbl("covar_platelet_mx") %>% group_by(measurement_concept_id, 
-        #                                 measurement_concept_name, 
-        #                                 unit_concept_name,
-        #                                 range_high, range_low) %>% summarise(n = n()) %>% view()
-  rslt$platelet %>% output_tbl(name = "covar_platelet_mx_original")
-  rslt$platelet %>% filter(measurement_concept_id %in% c( "3007461", "3024929", "4267147"),
-                          !is.na(value_as_number)) %>% 
-                    mutate(value_as_number = value_as_number * 1000, unit_concept_name = "per microliter") %>%
-                    output_tbl(name = "covar_platelet_mx")
-                                
-  append_sum(cohort = 'platelet',
-                 persons = rslt$platelet %>% distinct_ct())  
-
-    # platelet transfusion
-    rslt$platelet_transfusion_pre <- get_outcome_procedures(results_tbl("study_cohorts"),
-                                                        px_codeset = load_codeset("platelet_transfusion_px"),
-                                                        is_pre = TRUE, is_closet = FALSE)
-    rslt$platelet_transfusion_pre %>% output_tbl(name = "covar_platelet_transfusion_pre_px")
-    rslt$platelet_transfusion %>% output_tbl(name = "covar_platelet_transfusion_post_px")
-    results_tbl("covar_platelet_transfusion_pre_px") %>% union(results_tbl("covar_platelet_transfusion_post_px")) %>% 
-                collect_new() %>% filter(!is.na(procedure_date)) %>%
-                output_tbl(name = "covar_platelet_transfusion_px")
-    rslt$platelet_transfusion %>% view()
-    # how many transplant patients who never had a platelet transfusion
-    # cohort_ct = 849
-    # n = 426 who never had an transfusion??? 
-    no_transfusion_id <- results_tbl("study_cohorts") %>% 
-                distinct(person_id, transplant_date) %>% 
-                anti_join(results_tbl("covar_platelet_transfusion_px") %>% 
-                            distinct(person_id, transplant_date), by = c("person_id", "transplant_date")) %>%
-                            compute_new()
-    # did we miss sth?
-    cdm_tbl("procedure_occurrence") %>% inner_join(no_transfusion_id, by = "person_id") %>% 
-                filter(procedure_date <= transplant_date + days(180), procedure_date >= transplant_date - days(180),
-                        grepl("transfusion", procedure_concept_name, ignore.case = TRUE)) %>%
-                # distinct(person_id, transplant_date, procedure_concept_id, procedure_concept_name, .keep_all = TRUE) %>%
-                select(person_id, transplant_date, procedure_concept_id, procedure_concept_name, procedure_date) %>% 
-                arrange(person_id, transplant_date, procedure_date) %>% view()
-                
-    # calculate platelet engraftment date
-    
-    # get the first of 3 consecutive days with a platelet count of 20,000/uL or higher
-    # when there were multiple measurements on the same day, we take the mean
-    # but then Nora suggested taking the max values
-     tbl <- results_tbl("covar_platelet_mx") %>% collect_new() %>% 
-                group_by(person_id, transplant_date, measurement_date) %>%
-                summarise(value_as_number = max(value_as_number, na.rm = TRUE)) %>%
-                mutate(platelet_day = as.numeric(difftime(measurement_date, transplant_date, units = "days")),
-                       val_ct = ifelse(value_as_number >= 20000, 1, 0)) %>% 
-                mutate(platelet_consec = ifelse((lead(platelet_day, 1) - platelet_day == 1) & (lead(platelet_day, n =2) - platelet_day== 2) &
-                                          (val_ct + lead(val_ct, 1) + lead(val_ct, n =2)) == 3, TRUE, FALSE)) %>% 
-                ungroup() %>% 
-                filter(platelet_consec == TRUE) %>%
-                select(-val_ct)
-
-      # The first of 3 consecutive days with a platelet count of 20,000/uL or higher 
-      # in the absence of platelet transfusion for 7 consecutive days.
-#       tbl %>% inner_join(results_tbl("covar_platelet_transfusion_px") %>% 
-#                                 distinct(person_id, transplant_date, procedure_date) %>% 
-#                                 collect_new() %>%
-#                                 # ignore the platelet transfusion that happened outside of 100 days within the transplant date
-#                                 filter(abs(as.numeric(difftime(procedure_date, transplant_date, units = "days"))) <= 100),
-#                         by = c("person_id", "transplant_date")) %>% 
-#                         filter(as.numeric(difftime(measurement_date, procedure_date, units = "days")) >= 7) %>%
-                        
-#                         # slice_min(measurement_date, n = 1, with_ties = FALSE) %>%
-#                         select(person_id, transplant_date, 
-#                                 platelet_transfusion_date = procedure_date, 
-#                                 platelet_engraftment_date = measurement_date) %>%
-#                         group_by(person_id, transplant_date) %>%
-#                         slice_max(platelet_transfusion_date, n = 1, with_ties = TRUE) %>% ungroup() %>%
-#                         group_by(person_id, transplant_date, platelet_transfusion_date) %>%
-#                         slice_min(platelet_engraftment_date, n = 1, with_ties = FALSE) %>%
-#                         mutate(platelet_engraftment_day = as.numeric(difftime(platelet_engraftment_date, transplant_date, units = "days"))) %>%
-#                         # filter(as.numeric(difftime(platelet_engraftment_date, transplant_date, units = "days")) >= 7) %>%
-#                         arrange(person_id, transplant_date, platelet_engraftment_date, platelet_transfusion_date) %>%
-#                         view()
-        t1 <- tbl %>% left_join(results_tbl("covar_platelet_transfusion_px") %>% 
-                                distinct(person_id, transplant_date, procedure_date) %>% 
-                                collect_new() %>%
-                                mutate(transfusion_days_since_transplant = as.numeric(difftime(procedure_date, transplant_date, units = "days"))) %>% 
-                                # ignore the platelet transfusion that happened outside of 100 days within the transplant date
-                                filter(abs(transfusion_days_since_transplant) <= 100),
-                        by = c("person_id", "transplant_date")) %>% 
-                        mutate(#days_since_transplant = as.numeric(difftime(platelet_engraftment_date, transplant_date, units = "days")),
-                                days_since_transfusion = as.numeric(difftime(measurement_date, procedure_date, units = "days"))) %>%
-                        filter(days_since_transfusion >= 7) %>%
-                        group_by(person_id, transplant_date) %>%
-                        slice_min(days_since_transfusion, n = 1, with_ties = FALSE) %>%
-                        slice_min(platelet_day, n = 1, with_ties = FALSE) %>%
-                        select(person_id, transplant_date, 
-                                last_transfusion_date = procedure_date, 
-                                platelet_engraftment_date = measurement_date,
-                                days_since_transplant = platelet_day,
-                                days_since_last_transfusion = days_since_transfusion) %>%
-                        arrange(person_id, transplant_date, platelet_engraftment_date, last_transfusion_date) %>% collect()
-
-        # case when engraftment date is the same as the transplant date
-        t1 %>% filter(platelet_engraftment_date == transplant_date) %>% 
-                distinct(person_id, transplant_date, .keep_all = TRUE) %>% 
-                inner_join(results_tbl("covar_platelet_mx") %>% collect_new(), by = c("person_id", "transplant_date")) %>%              
-                mutate(platelet_day = as.numeric(difftime(measurement_date, transplant_date, units = "days")),
-                       val_ct = ifelse(value_as_number >= 20000, 1, 0)) %>% 
-                mutate(platelet_consec = ifelse((lead(platelet_day, 1) - platelet_day == 1) & (lead(platelet_day, n =2) - platelet_day== 2) &
-                                          (val_ct + lead(val_ct, 1) + lead(val_ct, n =2)) == 3, TRUE, FALSE)) %>% 
-                ungroup() %>% filter(platelet_consec == TRUE) %>%
-                select(person_id, transplant_date, measurement_date, 
-                        value_as_number, platelet_day, platelet_consec, 
-                        last_transfusion_date, days_since_transplant, days_since_last_transfusion, 
-                        platelet_engraftment_date) %>% view()
-
-                # output_tbl("covar_platelet_engraftment_mx")
-
-        # need to double check the very high engraftment_day, must be due to error with max(procedure_date)
-        # it look like the engraftment date for this patient is the date of the transplant
-        # the reason is that this patient did not have any platelet transfusion before on immediately after the transplant
-        # thus when slicing from the days since last transfusion, it will slice at the next transfusion which is 10 months later
-        # 2 things could have gone wrong: wrong unit conversion for the platelet count 
-        # or miss out codes from the platelet transfusion
-        id = "1544646"
-        tbl %>% filter(person_id == id) %>% #platelet counts
-                arrange(person_id, transplant_date, measurement_date) %>%
-        view()
-        results_tbl("covar_platelet_transfusion_px") %>% filter(person_id == id) %>% view()
-        tbl %>% left_join(results_tbl("covar_platelet_transfusion_px") %>% 
-                                distinct(person_id, transplant_date, procedure_date) %>% 
-                                collect_new() %>%
-                                mutate(transfusion_days_since_transplant = as.numeric(difftime(procedure_date, transplant_date, units = "days"))) %>% 
-                                # ignore the platelet transfusion that happened outside of 100 days within the transplant date
-                                filter(abs(transfusion_days_since_transplant) <= 100),
-                        by = c("person_id", "transplant_date")) %>% 
-                        mutate(#days_since_transplant = as.numeric(difftime(platelet_engraftment_date, transplant_date, units = "days")),
-                                days_since_transfusion = as.numeric(difftime(measurement_date, procedure_date, units = "days"))) %>%
-                        filter(days_since_transfusion >= 7, person_id == id) %>%
-                        group_by(person_id, transplant_date) %>%
-                        slice_min(days_since_transfusion, n = 1, with_ties = FALSE) %>%
-                        slice_min(platelet_day, n = 1, with_ties = FALSE) %>%
-                        select(person_id, transplant_date, 
-                                last_transfusion_date = procedure_date, 
-                                platelet_engraftment_date = measurement_date,
-                                days_since_transplant = platelet_day,
-                                days_since_last_transfusion = days_since_transfusion) %>%
-                        arrange(person_id, transplant_date, platelet_engraftment_date, last_transfusion_date) %>%
-                        view()
+   
     # who had a another transplant after the first one?
 #     rslt$cohort %>% inner_join(results_tbl("transplant_px"), by = c("person_id")) %>% 
 #                 group_by(person_id) %>% 

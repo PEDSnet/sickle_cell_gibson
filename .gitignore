@@ -17,6 +17,7 @@
 .#*
 .Rproj.user
 **/docs/**
+**/redcap/**
 **/Levon/**
 *.code-workspace*
 *.json

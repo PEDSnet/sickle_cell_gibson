@@ -63,7 +63,8 @@ dbi_con <- function(db) {
 #' @md
 cdm_tbl <-
   function(name, db = config('db_src'))
-    .qual_tbl(name, 'cdm_schema', db)
+    # .qual_tbl(name, 'cdm_schema', db)
+    .qual_tbl(paste0("cdm_", name), 'results_schema', db) # after cutting mini cdm
 
 #' Connect to an existing CDM vocabulary table
 #'
@@ -397,7 +398,7 @@ compute_new <- function(tblx,
       start <- Sys.time()
       message(start)
     }
-    rslt <- dplyr::collapse(tblx, name = name, temporary = temporary, ...)
+    rslt <- dplyr::compute(tblx, name = name, temporary = temporary) #, ...)
     if (config('db_trace')) {
       end  <- Sys.time()
       message(end, ' ==> ', format(end - start))

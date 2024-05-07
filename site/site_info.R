@@ -67,7 +67,7 @@ config('vocabulary_schema', 'vocabulary')
 #' explicit schema is used, and tables are created wherever the DBMS
 #' places them.  It can be overridden by the request-specific setting in `run.R`.
 #' @md
-config('default_results_schema', "sickle_cell_gibson")
+config('default_results_schema', "v51_sickle_cell_gibson")
 
 #' Whether or not to keep intermediate tables
 #'

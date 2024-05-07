@@ -264,7 +264,7 @@ table1(~gender + age_group + transplant_type + scd_type, data = cohort %>% disti
 - Statistical analysis: time-to-event analysis using a competing risks analysis. Competing risks include death and graft failure requiring a second transplant. 
 
 # Aim 2_1:
-## Aim 2a_2: Post-transplant ferritin status
+## Aim 2a_2: Pre-transplant ferritin status
 ```{r aim_2a_2}
 source("../code/EDA.R")
 aim_2a_2 <- cohort_covars %>% filter(aim == "aim_2a_2") %>%
@@ -288,10 +288,11 @@ table1(~death + death_days_since_ce +
                   "** Missing indicates no culture test was found, No means a negative result was reported"))
 ```
 
-## Aim 2b_2: Pre-transplant ferritin status
+## Aim 2b_2: Post-transplant ferritin status
 ```{r aim_2b_2}
 aim_2b_2 <- cohort_covars %>% filter(aim == "aim_2b_2") %>%
   mutate(death = if_else(death == TRUE, "Death", "Alive"), 
+        bacteremia = if_else(is.na(bacteremia), "Not Detected", bacteremia), 
         disease_relapse_days_since_ce = as.numeric(difftime(disease_relapse_date, transplant_date, units = "days")))
 label(aim_2b_2$disease_relapse) = "Disease relapse"
 label(aim_2b_2$disease_relapse_days_since_ce) = "No days since ce until disease relapse*"
@@ -307,8 +308,8 @@ table1(~death + death_days_since_ce +
       death_days_since_last_transplant +
       GVHD + VOD + bacteremia| ferritin_level, 
       data = aim_2b_2,
-      footnote = c("* Missing indicates patients without disease relapse/death", 
-                  "** Missing indicates no culture test was found, No means a negative result was reported"))
+      footnote = c("* Missing indicates patients without disease relapse/death"))
+                  # "** Missing indicates no culture test was found, No means a negative result was reported"))
 ```
 ## Aim 3: Post-transplant iron reduction therapy (IRT)
 ```{r aim_3}
@@ -317,6 +318,46 @@ table1(~IRT| ferritin_level,
       data = cohort_covars %>% distinct(person_id, transplant_date, .keep_all = TRUE))
 ```
 
+# Chart review data: 
+```{r cr_sum}
+cr_data <- read.csv("../redcap/IronOverloadChartRev_DATA_2024-05-02_1145.csv") %>% 
+            # filter out old patient ids
+           filter(!grepl("^[A-Za-z]", record_id))
+total_ct <- cr_data %>% distinct_ct("record_id")
+
+cr_data <- cr_data %>% rename(site = redcap_data_access_group, 
+                        chart_completion = iron_overload_chart_review_complete,
+                        transplant_date = date_tpx,
+                        transplant_type = tpx_type) %>%
+                mutate(transplant_type = case_when(transplant_type == 1 ~ "Allogeneic", 
+                                            transplant_type == 2 ~ "Autologous/Gene therapy", 
+                                            TRUE ~ NA),
+                        chart_completion = if_else(chart_completion == 2, TRUE, FALSE), 
+                        across(iron_date_1:est_method_15, ~if_else(.x == "", NA, .x)),
+                        across(c("transplant_date", "second_transplant_date"), ~if_else(.x == "", NA, .x)),
+                        across(iron_val_1:iron_val_15, ~as.numeric(.x)),
+                        # transplant_date = if_else(transplant_date == "", NA, as.Date(transplant_date)),
+                        eligibility = case_when(is.na(transplant_date ) & is.na(eligibility) ~ 0,
+                                                !is.na(transplant_date ) & is.na(eligibility) ~ 1,  
+                                                TRUE ~ eligibility)) %>%
+                filter(chart_completion) 
+completed_ct <- cr_data %>% distinct_ct("record_id")
+true_positives_ct <- cr_data %>% filter(!is.na(transplant_date)) %>% distinct_ct("record_id")
+false_positives_ct <- cr_data %>% filter(is.na(transplant_date)) %>% distinct_ct("record_id")
+```
+
+- Total number of chart reviews: `r total_ct`
+- Number of completed chart reviews: `r completed_ct`
+- Number of false positives: `r false_positives_ct`
+- Number of true positives: `r true_positives_ct`
+
+```{r cr_status_by_site}
+cr_data %>% group_by(site, eligibility) %>% 
+      summarise(n = n_distinct(record_id)) %>% ungroup() %>%
+      mutate(eligibility = if_else(eligibility == 0, "false_positives", "true_positives")) %>%
+      pivot_wider(id_cols = site, names_from = eligibility, values_from = n) %>% 
+      prettify_kable()
+```
 # Overall statistics: 
 ## Counts stratified by transplant concept names: 
 ```{r transplant_id_sum}

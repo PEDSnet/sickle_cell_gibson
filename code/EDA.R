@@ -2,62 +2,18 @@
 library(tidyr)
 library(lubridate)
 
-# message("calculate ANC engraftment dates")
-# rslt$ANC <- results_tbl("covar_anc_mx") %>% collect_new()
-# rslt$transplant_px <- results_tbl("no_multi_transplant_px") %>% collect_new()
+library(pdftools)
+library(ggplot2)
 
-# # Determine number of subsets/pages based on the number of unique groups
-# num_pages <- ceiling((rslt$ANC %>% distinct_ct()) / 8)  # Assuming 8 plots per page
+rslt = list()
 
-# # Function to generate and save plots for each page
-# generate_plots <- function(data, transplant_px, page_num) {
-# data <- data %>% mutate(days = as.numeric(difftime(measurement_date, transplant_date, units = "days")))
-# start_index <- (page_num - 1) * 8 + 1
-# end_index <- min(page_num * 8, (rslt$ANC %>% distinct_ct()))
-# person_ids <- data %>% distinct(person_id) %>% pull()
-# subset_data <- subset(data, person_id %in% person_ids[start_index:end_index])
-# subset_transplant <- subset(transplant_px, person_id %in% person_ids[start_index:end_index]) %>%
-#                     group_by(person_id) %>%
-#                     mutate(transplant_days = as.numeric(difftime(transplant_date, min(transplant_date), units = "days"))) %>%
-#                     summarise(transplant_1 = min(transplant_days),
-#                             transplant_2 = max(transplant_days)) %>%
-#                     select(person_id, transplant_1, transplant_2) %>% ungroup()
-
-# subset_data <- subset_data %>% inner_join(subset_transplant, by = c("person_id"))
-
-# p <- subset_data %>% ggplot(aes(x = days, y = ANC)) + geom_point() + 
-#     geom_hline(yintercept = 500, linetype = "dashed", color = "red") +  
-#     # geom_vline(xintercept = transplant_1, linetype = "dashed", color = "green") +  
-#     # geom_vline(xintercept = transplant_2, linetype = "dashed", color = "green") +  
-#     geom_point(aes(x = transplant_1, y = 1000), color = "red", shape = 16, alpha = 0.5) + 
-#     geom_point(aes(x = transplant_2, y = 1000), color = "red", shape = 16, alpha = 0.5) + 
-#     facet_wrap(~person_id, ncol = 2, scales = "free") +
-#     coord_cartesian(xlim = c(0, 50), ylim = c(0, 5000))
-
-# plot_filename <- paste0("results/ANC_plots/plots_page_", page_num, ".pdf")
-# pdf(plot_filename)
-# print(p)
-# dev.off()
-# return(plot_filename)
-# }
-
-# library(pdftools)
-
-# # List to store individual PDF file names
-# pdf_files <- list()
-
-# # Loop through pages and generate plots
-# for (i in 1:num_pages) {
-# pdf_files[[i]] <- generate_plots(data=rslt$ANC %>% filter(unit_concept_name != "No information"), 
-#                                 transplant_px = rslt$transplant_px, i)
-# }
-
-# # Combine all PDF files into a single one
-# combined_pdf_filename <- "results/ANC_plots/combined_plots.pdf"
-# pdf_combine(pdf_files, combined_pdf_filename)
-
-# # Remove individual PDF files
-# file.remove(pdf_files)
+rslt$study_cohorts <- results_tbl("study_cohorts") %>% select(person_id, aim_2a_1:aim_3_2) %>%
+                    union(results_tbl("multi_transplant_cohort") %>% anti_join(results_tbl("study_cohorts"), by = "person_id") %>% 
+                            select(person_id, aim_2a_1:aim_3_2)) %>%
+                    collect()
+study_cohorts <- results_tbl("study_cohorts") %>% collect() %>% select(person_id, site, gender)
+                        left_join(results_tbl("cr_cohorts") %>% 
+                                select(person_id, record_id, transplant_date, transplant_type, second_transplant_date) %>% collect(), by = "person_id")
 
 # get iron overload status
 # majority with units nanogram per milliliter
@@ -76,6 +32,7 @@ cohort_covars <- results_tbl("covar_ferritin_mx") %>%
                         filter(no_transplants > 1) %>% 
                         ungroup() %>% mutate(disease_relapse = TRUE) %>% collect(), by = "person_id") %>%
             mutate(disease_relapse = if_else(is.na(disease_relapse), FALSE, disease_relapse))
+
 cohort_covars %>% view()
 # a patient could be included in multiple aims
 cohort_covars %>% distinct(person_id, aim) %>% count() # n = 1159
@@ -128,7 +85,8 @@ cohort_covars %>% distinct(person_id, aim, vod_date) %>% count() # n = 1159
 # bacteremia status
 cohort_covars <- cohort_covars %>%
                         left_join(results_tbl("covar_bacteremia_dx") %>% collect() %>%
-                                    mutate(bacteremia_days_since_ce = as.numeric(difftime(bacteremia_date, transplant_date, units = "days"))) %>%
+                                    mutate(bacteremia_days_since_ce = as.numeric(difftime(bacteremia_date, transplant_date, units = "days")),
+                                           bacteremia = organism_concept_name) %>%
                                     group_by(person_id, transplant_date) %>%
                                     filter(bacteremia_days_since_ce >= 0) %>%
                                     slice_min(abs(bacteremia_days_since_ce), n = 1, with_ties = FALSE) %>% 
@@ -143,7 +101,7 @@ cohort_covars %>% distinct(person_id, aim, bacteremia_date) %>% count() # n = 11
 #                                 select(person_id, transplant_date, 
 #                                         immune_date = measurement_date,
 #                                         immune_type = CDtype,
-#                                         measurement_concept_id, measurement_concept_name, unit_concept_name, range_high, range_low,
+#                                             measurement_concept_id, measurement_concept_name, unit_concept_name, range_high, range_low,
 #                                         immune_val = value_as_number)
 
 # cases when patients received both phlebotomy and chelation
@@ -163,3 +121,5 @@ cohort_covars %>%view()
 # cohort_covars %>% filter(!(duplicated(person_id) & IRT == "No IRT")) %>% 
 #                 select(person_id, transplant_date, IRT, aim) %>%  arrange(person_id, IRT) %>%  view()
                 # filter(!(duplicated(person_id, transplant_date) & (IRT == "phlebotomy" | IRT == "chelation"))) %>% view()
+
+message("Compute platelet engraftment dates")

@@ -121,7 +121,7 @@ config('retain_intermediates', FALSE)
 #' during processing of the request.
 #' If it is `NA`, the default value from site_info.R is used.
 #' @md
-config('results_schema', "sickle_cell_gibson")
+config('results_schema', "v51_sickle_cell_gibson")
 
 #' Request-specific suffix for output
 #'

@@ -383,3 +383,49 @@ get_outcome_procedures <- function(cohort,
     tbl <- tbl %>% inner_join(px_codeset %>% select(concept_id) %>% collect_new(), by = c("procedure_concept_id" = "concept_id"))                
     return(tbl)
 }
+
+# get outcome measurements within 365 days following ce_date
+get_outcome_organism <- function(cohort,
+                                     lab_tbl=cdm_tbl("measurement_organism"),
+                                     mx_codeset = load_codeset(codeset_name),
+                                     min_days = 0,
+                                     max_days = 365,
+                                     is_pre = FALSE,
+                                     is_closet = TRUE) {
+  tbl <- cohort %>% select(person_id, ce_date, transplant_date, site) %>%
+    left_join(lab_tbl %>% select(measurement_id, 
+                                    person_id,
+                                    organism_concept_id,
+                                    organism_concept_name, 
+                                    positivity_datetime), by = 'person_id') 
+
+  tbl <- tbl %>% inner_join(cdm_tbl("measurement") %>% select(measurement_date,
+                                    measurement_id, 
+                                    person_id,
+                                    measurement_concept_id,
+                                    measurement_concept_name,  
+                                    value_as_number,
+                                    value_as_concept_name,
+                                    specimen_concept_id, 
+                                    specimen_source_value), by = c("measurement_id", "person_id")) %>% 
+            collect_new() 
+            # mutate(bacteremia_date = as.Date(positivity_datetime, format = "%Y-%m-%d"))
+  if(is_pre){
+    tbl <- tbl %>% filter(as.numeric(difftime(ce_date, measurement_date, units = "days")) >= min_days,
+                          as.numeric(difftime(ce_date, measurement_date, units = "days")) <= max_days)
+  } else {
+    tbl <- tbl %>% filter(as.numeric(difftime(measurement_date, ce_date, units = "days")) >= min_days,
+                          as.numeric(difftime(measurement_date, ce_date, units = "days")) <= max_days)
+  }
+  if(is_closet){
+    tbl <- tbl %>% group_by(person_id, transplant_date, measurement_concept_id) %>% 
+                  slice_min(abs(difftime(measurement_date, ce_date, units = "days")), n = 1, with_ties = FALSE) %>% 
+                  rename(bacteremia_date = measurement_date) %>%
+                  filter(bacteremia_date >= ce_date) %>% ungroup() %>%
+                  filter(grepl("blood", specimen_source_value, ignore.case = TRUE))
+                  # filter(value_as_concept_name == "Detected" | value_as_concept_name == "Positive" | !is.na(positivity_datetime),
+  }
+       
+    return(tbl)
+}
+# tbl %>% filter(!is.na(positivity_datetime), )
