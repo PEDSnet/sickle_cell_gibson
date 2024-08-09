@@ -1,5 +1,3 @@
-setwd("~/Projects/sickle_cell_Gibson/")
-source("site/run.R")
 
 .run  <- function() {
 
@@ -64,6 +62,11 @@ source("site/run.R")
                 persons = distinct_ct(rslt$ferritin_cohort))
     rslt$ferritin_cohort %>% output_tbl(name = "ferritin_lab", indexes = list('person_id'), local = FALSE, results_tag = FALSE)
 
+    rslt$leukemia <- find_procedures("leukemia_dx_px") %>% distinct(person_id) %>%
+                    union(find_conditions(load_codeset("leukemia_dx_px")) %>% distinct(person_id)) %>% 
+                    distinct(person_id) %>% compute_new()
+    rslt$leukemia %>% output_tbl(name = "leukemia_dx_px", indexes = list('person_id'), local = FALSE, results_tag = FALSE)
+    
     # find patients with pre-transplant abdominal or liver MRI (within 1 year)
     rslt$aim_2a_1_cohort <- find_scd_transplant_with_procedure(scd_cohort = results_tbl("scd_dx"), 
                                                                 transplant_cohort = results_tbl("no_multi_transplant_px"), 

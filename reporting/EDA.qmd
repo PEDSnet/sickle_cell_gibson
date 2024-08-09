@@ -1,0 +1,644 @@
+---
+title: "EDA: The Effects of Iron Overload on Hemptotic Stemcell Transplant (HSCT) Outcomes in Sickle Cell Patients"
+author: "Nhat Nguyen \n PEDSnet Coordinating Center"
+date: "`r format(Sys.time(), '%B %d, %Y')`"
+format:
+  html:
+    page-layout: full
+    embed-resources: true
+    smooth-scroll: true
+    fig-cap: TRUE
+    df-print: paged
+    toc: TRUE
+    toc-depth: 5
+    toc-collapsed: TRUE
+    toc-float: TRUE
+    toc-location: left
+    number-sections: TRUE
+    number-depth: 3
+    output-file: Gibson_sickle_cell_EDA
+    output-ext: "html"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, message = FALSE, warning = FALSE, fig.width = 10, fig.height = 6, fig.align = "center")
+# Default taken from R notebook behavior: when knitting, wd will always be location of notebook
+base_dir <- '..'
+Sys.setenv(PEDSNET_SKIP_REQUEST_EXECUTION=1)
+tryCatch(source('../site/run.R'),
+         error = function (e) message(e)) # May not be able to make db connection
+
+# Set to "local" to read data from ../results, or another value to read from db
+data_source <- "not_local" #if_else(config('execution_mode') == 'distribution', 'local', 'not_local')
+
+require(tidyr)
+require(knitr)
+require(kableExtra)
+require(stringr)
+require(tibble)
+require(ggplot2)
+require(table1)
+require(tidyverse)
+```
+
+```{r functions, include=FALSE}
+get_codesets <- function(codeset_name) {
+  read_csv(paste0('../specs/', codeset_name, '.csv'), col_types = c('c', 'c', 'c', 'c'), show_col_types = FALSE) %>%
+  mutate(concept_id = as.character((concept_id)), concept_code = as.character((concept_code))) %>% collect()
+}
+
+get_results <- function(tbl_name) {
+  if (data_source == 'local') {
+    rslt <- read.csv(paste0('../local/', tbl_name, '.csv'))
+  }
+  else {
+    rslt <- results_tbl(tbl_name) %>% collect()
+  }
+  rslt
+}
+
+prettify_kable <- function(data) {
+  rslt <- data %>% kable(digits = 4, format.args = list(big.mark = ','))
+  if (knitr::is_html_output()) rslt <- rslt %>%
+      kable_styling(bootstrap_options = c("striped", "hover")) %>%
+      column_spec(1, bold = T, border_right = T)
+  rslt
+}
+
+my.render.cont <- function(x) {
+    with(stats.apply.rounding(stats.default(x), digits=2), c("",
+        "Median [Min, Max]"=sprintf("%s [%s, %s])", MEDIAN, MIN, MAX)))
+}
+```
+
+```{r report_recap, echo=FALSE, message=FALSE, warning=FALSE, paged.print=FALSE}
+tribble( ~Item, ~Value,
+         'Title', config('title'),
+         'PI', config('requester_name'),
+         'CDM Version', as.character(config('cdm_version'))) %>%
+  prettify_kable()
+
+```
+```{r data, include= FALSE}
+cohort <- results_tbl("study_cohorts") %>%
+                    pivot_longer(cols = aim_2a_2:aim_3_2, names_to = "aim", values_to = "which_aim") %>% 
+                    filter(which_aim == TRUE) %>% 
+                    collect() %>%
+                    mutate(age_at_ce = round(as.numeric(difftime(transplant_date, birth_date, units = "days"))/365.25)) %>%
+                    # mutate(transplant_type = case_when(grepl("allogeneic", transplant_concept_name, ignore.case = TRUE) ~ "allogeneic",
+                    #                           grepl("autologous", transplant_concept_name, ignore.case = TRUE) ~ "autologous",
+                    #                           TRUE ~ "unknown")) %>% 
+                    select(person_id, aim, site, age_at_ce , gender, scd_concept_name, scd_type, transplant_concept_name, transplant_type, transplant_date)
+cohort_ct <- cohort %>% distinct_ct()
+```
+
+**Confidentiality:** Please treat the contents of this report as confidential, and do not redistrubute beyond PEDSnet staff and the requester.
+
+# Cohort Definition
+
+-   **Time Anchors:** The specific details of cohort formation are described below. Note that for dates, we use notation to indicate time, where 0 refers to the day that a patient enters the cohort, a positive integer refers to the number of days after the cohort entrance that the observation period lasts, a negative interger refers to the number of days before the cohort entrance that the observation period lasts, oo refers to the end of the study period, and -oo refers to the beginning of the study period.
+
+-   **Study period:** 1/1/2010 – 6/30/2023, specifically:
+    - Aim 2a: 1/1/2010 – 6/30/2023
+    - Aim 2b & 3: 1/1/2010 – 12/31/2022
+
+-   **Cohort entrance date:** Date of first transplant
+
+-   **Follow-up window:** 
+    - Interval during which outcome(s) of interest may be included in the analysis: [-365, 00].
+    - Exposures of interest (LIC, ferritin) for Aims 2a can be observed from -365 days to 0.
+    - Exposures of interest (LIC, ferritin) for Aims 2b and 3 can be observed from day +90 to +365.
+    - Exposures of interest (deferasirox or deferoxamine prescription, phlebotomy procedure) for Aim 3 can be observed from day +90 to 00. 
+    - Outcomes of interest for Aim 2a can be observed from day 0 to 00 
+    - Outcomes of interest for Aim 2b can be observed from date of post-transplant LIC or ferritin to 00. 
+    - Outcomes of interest for Aim 3 can be observed from date of prescription of deferasirox or deferoxamine to 00, or date of first phlebotomy to 00
+
+-   **Inclusion/exclusion criteria:** 
+    - Aim 1: Pre-HSCT iron overload: Exclude patients who do not have either a pre-HSCT ferritin or LIC. Post-HSCT iron overload: exclude patients who do not have an LIC or ferritin 6-12 months after HSCT. 
+    - Aim 2a: Include patients whose first transplant between 1/1/2010 – 6/30/2023. Exclude patients who do not have either a pre-HSCT ferritin or LIC. 
+    - Aim 2b and 3: Include patients whose first transplant between 1/1/2010 – 12/1/2022. Exclude patients who do not have an LIC or ferritin 6-12 months after HSCT. 
+    - Aim 3: Exclude patients who did not require post-transplant chelation or phlebotomy.
+
+# Variable definition:
+- **LIC level**:
+  - Low: <5 mg Fe/g dry wt
+  - Moderate: [5, 10] mg Fe/g dry wt
+  - High: >10 mg Fe/g dry wt
+  - Binary classification: Low: <8 mg Fe/g dry wt and High otherwise
+- **Ferritin level**:
+  - Low: <1000 ng/mL 
+  - Moderate: 1000-2500 ng/mL 
+  - High: >=2500 ng/mL 
+- **Immune reconstitution**: 
+  - CD3 count >500
+  - CD4 count >200 
+  - CD8 count >200
+  - IgM >25. 
+- **VOD**: 
+  - **(1)** (Prescription of defibrotide after transplant date AND Abdominal ultrasound within 2 days) within 90 days of transplant. 
+  - ~~**(2)** (Abdominal ultrasound AND total bilirubin >2 mg/dL within 3 days) within 90 days of transplant~~ --- old definition, no longer used 
+  OR 
+  - **(3)** (Abdominal ultrasound AND total bilirubin >2 mg/dL within 2 days AND significant weight gain defined as: weight gain on 3 consecutive measurements within 10 days of ultrasound OR weight gain >5% of admission weight within 10 days of ultrasound) within 90 days of transplant
+  OR
+  - **(4)** Peritoneal drain placement procedure during transplant admission
+(this should show up as a procedure code during admission) --- new criterion 
+  OR 
+  - **(5)** Veno-occlusive disease (VOD) or sinusoidal obstruction syndrome (SOS) on patient problem list --- new criterion
+- **Neutrophil Engraftment**: The first of 3 successive days with an absolute neutrophil count (ANC) of 500/uL after post-transplantation nadi (Nadir usually occurs within 7-14 days after date of transplant) 
+- **Platelet engraftment**: The first of 3 consecutive days with a platelet count of 20,000/uL or higher in the absence of platelet transfusion for 7 consecutive days. 
+- **Primary graft failure**: 
+  - Must have not met criteria for neutrophil engraftment or platelet engraftment previously
+  - ANC <500/uL by day +28 after transplant AND hemoglobin < 8g/dL AND platelets < 20,000/uL 
+- **Secondary graft failure**: 
+  - Must have NOT met the requirement for primary graft failure 
+  - Requirement for red blood cell or platelet transfusions, or need for G-CSF medication (growth colony stimulating factor --- normally given by injections) AFTER meeting criteria for neutrophil or platelet engraftment previously 
+
+# Conditions and Procedure Codesets:
+-   A compehensive code search was performed for all the conditions, procedures, and measurements specified in the DAP. The list of codesets could be found [here](https://chop365.sharepoint.com/teams/RSCH-ACRC/Shared%20Documents/Forms/AllItems.aspx?id=%2Fteams%2FRSCH%2DACRC%2FShared%20Documents%2FPEDSnet%2FPEDSnet%20Studies%2FActive%20Studies%2FGibson%5FIron%20Overload%2FQueries%2FCodesets%5F2024Feb27&viewid=fbc819dd%2Dfbe7%2D4805%2Da6fc%2D03eda92856f5).
+
+
+# Result Summary
+
+- <span style="background-color: #FFFF00"> For patients without chart review data, we use date of first transplant from EHR as cohort entry (CE)</span>. 
+
+- The provisional cohort comprises `r format(cohort_ct, big.mark = ",")` patients from `r summarise(cohort, ct = n_distinct(site)) %>% pull(ct)` PEDSnet sites for all 3 Aims.
+    - Chart review data include `r cohort %>% filter(aim != "aim_3_1", aim != "aim_3_2") %>% distinct_ct()` patients from aim 2a and 2b of this cohort and an additional n = 16 patients whose transplant dates and number of transplants were not verifiable from EHR data. 
+    - The columns are not mutally exclusive as patients could be eligible for multiple aims. 
+
+# Chart review 
+## Chart review progress
+```{r cohort_covars_run, echo= FALSE, message=FALSE, results='hide'}
+cohort_covars <- results_tbl("analytics_dataset") %>% collect() 
+```
+
+```{r cr_progress, echo= FALSE, message=FALSE, results='hide'}
+cr_data_raw <- read.csv("../redcap/IronOverloadChartRev_DATA_2024-08-08_1508.csv") %>% 
+            # filter out old patient ids
+           filter(!grepl("^[A-Za-z]", record_id)) %>% rename(site = redcap_data_access_group)
+total_cr_ct <- cr_data_raw %>% distinct_ct("record_id")
+
+# cleaned data
+cr_data <- get_redcap_data(redcap_filename = "../redcap/IronOverloadChartRev_DATA_2024-08-08_1508.csv") %>%
+            mutate(second_transplant = if_else(!is.na(second_transplant_date), TRUE, FALSE))
+completed_cr_ct <- cr_data %>% distinct_ct("record_id")
+true_positives_cr_ct <- cr_data %>% filter(eligibility == "Yes") %>% distinct_ct("record_id")
+false_positives_cr_ct <- cr_data %>% filter(eligibility == "No") %>% distinct_ct("record_id")
+
+# among chart reviews patients, how many had leukemia
+leukemia_dx_px <- results_tbl(name = "leukemia_dx_px") %>% collect()
+cr_data_w_leukemia <- cr_data %>% distinct(record_id, eligibility) %>%
+                        left_join(results_tbl("study_cohorts")%>% select(person_id, record_id) %>% collect(), by = c("record_id")) %>%
+                        inner_join(leukemia_dx_px, by = "person_id") %>%
+                        distinct(record_id, eligibility, person_id) 
+
+false_positives_cr_w_leukemia_ct <- cr_data_w_leukemia %>% filter(eligibility == "No") %>% 
+                        distinct_ct("record_id")
+true_positives_cr_w_leukemia_ct <- cr_data_w_leukemia %>% filter(eligibility == "Yes") %>% 
+                        distinct_ct("record_id")
+true_positives_cr_w_leukemia_prior_ct <- cohort_covars %>% filter(eligibility == "Yes") %>%
+                        filter(leukemia_prior) %>%
+                        distinct_ct("record_id")
+# completed_cr_w_leukemia_ct <- r_data_w_leukemia %>% distinct_ct("record_id")
+cr_w_leukemia_ct <- cr_data_raw %>% distinct(record_id) %>% left_join(results_tbl("study_cohorts")%>% select(person_id, record_id) %>% collect(), by = c("record_id")) %>%
+                        inner_join(leukemia_dx_px, by = "person_id") %>%
+                        distinct_ct("record_id")
+
+# number of true positives with matched transplant dates
+true_positves_matched_dates_ct <- cohort_covars %>% filter(transplant_date_consistency ==1) %>% filter(eligibility == "Yes") %>% distinct_ct()                       
+```
+
+- Total number of chart reviews: `r total_cr_ct`
+  - Number of patients with leukemia in this cohort: `r cr_w_leukemia_ct`
+- Number of completed chart reviews: `r completed_cr_ct` (`r round(completed_cr_ct/total_cr_ct*100)`%)
+- Number of false positives: `r false_positives_cr_ct` (`r round(false_positives_cr_ct/total_cr_ct*100)`%)
+  - <span style="background-color: #FFFF00">Number of false positives with leukemia: `r false_positives_cr_w_leukemia_ct` (`r round(false_positives_cr_w_leukemia_ct/false_positives_cr_ct*100)`% of total false positives) </span>
+- Number of true positives: `r true_positives_cr_ct` (`r round(true_positives_cr_ct/total_cr_ct*100)`%)
+  - <span style="background-color: #FFFF00"> Number of true positives with leukemia: `r true_positives_cr_w_leukemia_ct` (`r round(true_positives_cr_w_leukemia_ct/true_positives_cr_ct*100)`% of total true positives). Among these patients, n = `r true_positives_cr_w_leukemia_prior_ct` had leukemia diagnosed before transplants.</span>
+  - Number of true positives with transplant dates correctly idenftified by PEDSnet EHR: n = `r true_positves_matched_dates_ct` (`r round(true_positves_matched_dates_ct/true_positives_cr_ct*100)`% of total true positives)
+
+- <span style="background-color: #FFFF00">For cases when no. true positives and total valid charts dont match, due to the pending LIC/Ferritin values awaiting confirmation from Nora. In the final analytic dataset, the 2 columns should match </span>. 
+```{r cr_progress_by_site}
+# count false positives, true positives, num complted and num total for each site
+cr_completion_by_site <- cr_data %>% group_by(site, eligibility) %>% 
+      summarise(n = n_distinct(record_id)) %>% ungroup() %>%
+      mutate(eligibility = if_else(eligibility == "No", "n_false_positives", "n_true_positives")) %>%
+      # total counts per site
+      union(cr_data_raw %>% group_by(site) %>% summarise(n = n_distinct(record_id)) %>% ungroup() %>% mutate(eligibility = "n_total")) %>%
+      # total completed charts per site
+      union(cr_data %>% filter(chart_completion) %>% group_by(site) %>% summarise(n = n_distinct(record_id)) %>% ungroup() %>% mutate(eligibility = "n_completed")) %>%
+      pivot_wider(id_cols = site, names_from = eligibility, values_from = n) %>% 
+      rename("no. false positives" = n_false_positives, 
+             "no. true positives" = n_true_positives, 
+             "total no.charts" =  n_total,
+             "no. chart completed" =  n_completed)
+
+# count number of patients for each aim per site
+aim_ct_by_site <- cohort_covars %>% select(person_id, site, starts_with("aim")) %>%
+                    pivot_longer(cols = aim_2a_2:aim_3_2, values_drop_na = TRUE, names_to = "aim", values_to = "val") %>% filter(val) %>%
+                    group_by(site) %>% mutate(site_total = n_distinct(person_id)) %>% ungroup() %>% 
+                    group_by(site, aim, site_total) %>% 
+                    summarize(no_persons = n_distinct(person_id)) %>% ungroup() %>% collect() %>%
+                    rename("no. valid per site" = site_total) %>%
+                    pivot_wider(names_from = aim, values_from = no_persons) 
+                    
+cr_completion_by_site %>% left_join(aim_ct_by_site, by = "site") %>%                    
+                  prettify_kable()
+```
+
+```{r cr_summary}
+cr_t1 <- cr_data %>% select(record_id, chart_completion, eligibility, donor_relation,
+                            match_status, graft_fail, second_transplant) %>% distinct()
+label(cr_t1$chart_completion) = "Chart review completed"
+label(cr_t1$eligibility) = "Cohort Eligibility"
+label(cr_t1$donor_relation) = "Donor Relationship"
+label(cr_t1$match_status) = "Match Status"
+label(cr_t1$graft_fail) = "Graft failure*"
+label(cr_t1$second_transplant) = "Had a second transplant"
+
+table1(~eligibility + donor_relation + match_status + graft_fail +
+      second_transplant, 
+      data = cr_t1,
+      caption = "Chart Review Summary (Only Completed Charts)", 
+      footnote = "*Missing indicates false positive patients")
+```
+
+## Table 1: cohort characteristics
+```{r cohort_covars}
+cohort_covars <- cohort_covars %>% collect() %>% mutate(age_at_ce = as.numeric(difftime(transplant_date, birth_date, units = "days"))/365.25) %>% 
+                            mutate(age_group = case_when(age_at_ce < 5 ~ "[0, 5)",
+                                            age_at_ce < 10 ~ "[5, 10)",
+                                            age_at_ce < 15 ~ "[10, 15)",
+                                            age_at_ce < 20 ~ "[15, 20)",
+                                            age_at_ce < 40 ~ "[20, 40)",
+                                            TRUE ~ "40+"),
+                            age_group = factor(age_group, levels = c("[0, 5)","[5, 10)","[10, 15)",
+                                                                  "[15, 20)", "[20, 40)", "40+"))) %>%
+                            mutate(ethnicity = if_else(ethnicity == "No information", "Unknown", ethnicity),
+                            ethnicity = factor(ethnicity, levels = c("Hispanic or Latino", "Not Hispanic or Latino", "Other", "Unknown"))) %>%
+          mutate(survival = if_else(survival, "Alive", "Death"), 
+                survival_1yr = if_else(death_days_since_ce >= 365.25 | is.na(death_days_since_ce), "Alive", "Death"),
+                survival_3yr = if_else(death_days_since_ce >= (365.25*3) | is.na(death_days_since_ce), "Alive", "Death"),
+                survival_5yr = if_else(death_days_since_ce >= (365.25*5) | is.na(death_days_since_ce), "Alive", "Death"),
+                disease_relapse_days_since_ce = as.numeric(difftime(graft_fail_date, transplant_date, units = "days")),
+                bacteremia = if_else(is.na(bacteremia), "No", "Yes")) %>%
+          mutate(last_in_person_visit_since_ce = case_when(last_in_person_visit_since_ce <= 180 ~ "0-6 months",
+                                                  last_in_person_visit_since_ce <= 365.25 ~ "6-12 months",
+                                                  last_in_person_visit_since_ce <= 365.25*3 ~ "1-3 yrs",
+                                                  last_in_person_visit_since_ce <= 365.25*5 ~ "3-5 yrs",
+                                                  last_in_person_visit_since_ce > 365.25*5 ~ "more than 5-yrs",
+                                                  TRUE ~ NA),
+         age_at_ce = round(as.numeric(difftime(transplant_date, birth_date, unit = "days"))/365.25),
+         donor_relation = if_else(is.na(donor_relation), "Unknown", donor_relation),
+         match_status = if_else(is.na(match_status), "Unknown", match_status),
+         second_transplant = if_else(is.na(second_transplant_date), "No", "Yes"),
+         gender = if_else(gender == "FEMALE", "Female", "Male"),
+         scd_type = recode(scd_type, "aa" = "aplastic anemia", "dba" = "Diamond-Blackfan anemia", "bta" = "beta thalassemia major", "scd" = "sickle cell disease")) %>%
+        mutate(CD3_reconstitution = case_when(CD3_reconstitute_3mon ~ "0-3 months",
+                                        CD3_reconstitute_6mon ~ "3-6 months",
+                                        CD3_reconstitute_9mon ~ "6-9 months",
+                                        CD3_reconstitute_12mon ~ "9-12 months", TRUE ~ "Never/after 12 months"),
+         CD4_reconstitution = case_when(CD4_reconstitute_3mon ~ "0-3 months",
+                                        CD4_reconstitute_6mon ~ "3-6 months",
+                                        CD4_reconstitute_9mon ~ "6-9 months",
+                                        CD4_reconstitute_12mon ~ "9-12 months", TRUE ~ "Never/after 12 months"),
+         CD8_reconstitution = case_when(CD8_reconstitute_3mon ~ "0-3 months",
+                                        CD8_reconstitute_6mon ~ "3-6 months",
+                                        CD8_reconstitute_9mon ~ "6-9 months",
+                                        CD8_reconstitute_12mon ~ "9-12 months", TRUE ~ "Never/after 12 months"),
+         IgM_reconstitution = case_when(IgM_reconstitute_3mon~ "0-3 months",
+                                        IgM_reconstitute_6mon ~ "3-6 months",
+                                        IgM_reconstitute_3mon ~ "6-9 months",
+                                        IgM_reconstitute_12mon ~ "9-12 months", TRUE ~ "Never/after 12 months")) %>%
+         mutate(across(ends_with("reconstitution"), ~factor(.x, levels = c("0-3 months", "3-6 months", "6-9 months", "9-12 months", "Never/after 12 months")))) %>%
+         mutate(vod_subgroup = if_else(vod, scd_type, "No VOD")) %>% 
+         mutate(vod_subgroup = factor(vod_subgroup, levels = c("aplastic anemia", "diamond-blackfan anemia", "beta thalassemia major", "sickle cell disease", "No VOD"))) %>%
+         mutate(busulfan_and_vod = case_when(has_busulfan & vod ~ "busulfan & VOD",
+                                            has_busulfan & !vod ~ "busulfan & No VOD", 
+                                            TRUE ~ "Other categories")) %>%
+         mutate(across(c("has_busulfan"), ~if_else(is.na(.x) | !(.x), "No", "Yes")))
+
+label(cohort_covars$disease_relapse) = "Disease relapse/Graft failure"
+label(cohort_covars$age_at_ce) = "Age at transplant"
+label(cohort_covars$transplant_type) = "Transplant type"
+label(cohort_covars$gender) = "Gender"
+label(cohort_covars$disease_relapse_days_since_ce) = "No days since CE until disease relapse*"
+label(cohort_covars$ferritin_days_pre) = "No days between CE and ferritin measurements"
+label(cohort_covars$survival) = "Overall survival"
+label(cohort_covars$survival_1yr) = "Overall survival at 1 yr after CE" 
+label(cohort_covars$survival_3yr) = "Overall survival at 3 yrs after CE"  
+label(cohort_covars$survival_5yr) = "Overall survival at 5 yrs after CE"  
+label(cohort_covars$death_days_since_ce) = "No days since CE until death*"
+# label(aim_2a_2$death_days_since_last_transplant) = "No days since disease relapse until death*"
+label(cohort_covars$GVHD) = "Graft-versus-host disease (GvHD)"
+label(cohort_covars$vod_subgroup) = "Incidence of veno-occlusive disease (VOD)"
+label(cohort_covars$bacteremia) = "Bacteremia"
+label(cohort_covars$ferritin_pre) = "Pre-transplant Ferritin Level"
+label(cohort_covars$second_transplant) = "Had a second transplant"
+label(cohort_covars$donor_relation) = "Donor relationship to the patient"
+label(cohort_covars$match_status) = "Match status"
+label(cohort_covars$scd_type) = "Disease Type"
+label(cohort_covars$last_visit_since_ce) = "Follow-up duration (yrs)"
+label(cohort_covars$LIC_level) = "Pre-transplant Ferritin Level"
+label(cohort_covars$LIC_days_since_transplant) = "No days between CE and LIC measurements"
+label(cohort_covars$CD3_reconstitution) = "CD3 reconstition post-transplant"
+label(cohort_covars$CD4_reconstitution) = "CD4 reconstition post-transplant"
+label(cohort_covars$CD8_reconstitution) = "CD8 reconstition post-transplant"
+label(cohort_covars$IgM_reconstitution) = "IgM reconstition post-transplant"
+label(cohort_covars$conditioning_type) = "Type of confitioning agents"
+label(cohort_covars$busulfan_and_vod) = "Bulsufan & VOD"
+label(cohort_covars$has_busulfan) = "Received Bulsufan"
+
+```
+
+```{r table1, echo=FALSE}
+cohort_t1 <- cohort_covars %>% filter(aim_2a_2 | aim_2a_1) %>% mutate(aim = "aim_2a") %>%
+                union(cohort_covars %>% filter(aim_2b_1 | aim_2b_2) %>% mutate(aim = "aim_2b")) %>%
+                union(cohort_covars %>% filter(aim_3_1 | aim_3_2) %>% mutate(aim = "aim_3") )%>%
+                union(cohort_covars %>% distinct(person_id, .keep_all = TRUE) %>% mutate(aim = "Total"))
+label(cohort_t1$age_group) = "Age at first transplant"
+label(cohort_t1$gender) = "Gender"
+label(cohort_t1$transplant_type) = "Type of transplant"
+label(cohort_t1$scd_type) = "Type of scd"
+
+table1(~gender + age_group + ethnicity + transplant_type + scd_type| aim, 
+      data = cohort_t1,
+      overall = FALSE, 
+      caption = "Table 1: cohort characteristics")
+
+```
+
+# Descriptive analysis: 
+## Aim_2a: Pre-transplant ferritin/LIC status
+- Percentage of overall survival in iron-overloaded patients vs non-iron overloaded patients 
+- Percentage of patients who experienced disease relapse in iron-overloaded patients vs non-iron overloaded patients 
+- Percentage of patients with GVHD in iron-overloaded patients vs non-iron overloaded patients 
+- Percentage of patients with VOD in iron-overloaded patients vs non-iron overloaded patients 
+- Neutrophil engraftment times in iron-overloaded patients vs non-iron overloaded patients 
+- Platelet engraftment times in iron-overloaded patients vs non-iron overloaded patients 
+
+### Aim_2a_1: Pre-transplant LIC status
+- <span style="background-color: #FFFF00">This table only has patients with complete chart reviews AND verifiable LIC unit conversions </span>
+- We can also look at the max LIC, the average of the 3 max values, or the average of the 3 most recent values. However, since many patients only had 1 or 2 LIC values before transplant. This makes little difference
+```{r aim_2a_1}
+aim_2a_1 <- cohort_covars %>% filter(aim_2a_1, !is.na(LIC_level), 
+                                    LIC_type == "pre-transplant", chart_completion) %>% collect()
+
+table1(~disease_relapse + disease_relapse_days_since_ce + 
+       survival + death_days_since_ce + 
+       LIC_days_since_transplant + 
+       survival_1yr + survival_3yr + survival_5yr + 
+      # death_days_since_last_transplant +
+      GVHD + vod_subgroup + bacteremia +
+      conditioning_type + 
+      has_busulfan + 
+      busulfan_and_vod| LIC_level, 
+      data = aim_2a_1,
+      caption = "Pre-transplant LIC status (Only patients with completed chart reviews AND verifiable LIC unit conversions)",
+      footnote = c("* Missing indicates patients without disease relapse/death"))
+```
+
+### Aim_2a_1: Pre-transplant LIC status with binary classification
+- <span style="background-color: #FFFF00">This table only has patients with complete chart reviews AND verifiable LIC unit conversions </span>
+- We can also look at the max LIC, the average of the 3 max values, or the average of the 3 most recent values. However, since many patients only had 1 or 2 LIC values before transplant. This makes little difference
+```{r aim_2a_1_binary}
+aim_2a_1_binary <- cohort_covars %>% filter(aim_2a_1, !is.na(LIC_level_3_binary), 
+                                    LIC_type == "pre-transplant", chart_completion) %>% collect()
+
+table1(~disease_relapse + disease_relapse_days_since_ce + 
+       survival + death_days_since_ce + 
+       LIC_days_since_transplant + 
+       survival_1yr + survival_3yr + survival_5yr + 
+      # death_days_since_last_transplant +
+      GVHD + vod_subgroup + bacteremia +
+      conditioning_type + 
+      has_busulfan + 
+      busulfan_and_vod| LIC_level_3_binary, 
+      data = aim_2a_1,
+      caption = "Pre-transplant LIC status (Only patients with completed chart reviews AND verifiable LIC unit conversions)",
+      footnote = c("* Missing indicates patients without disease relapse/death"))
+```
+
+### Aim_2a_2: Pre-transplant ferritin status
+- <span style="background-color: #FFFF00">This table only has patients with complete chart reviews </span>
+- <span style="background-color: #FFFF00">To-do: </span>
+  - The fraction of GVHD looks low compared to Armand 2007 
+  - Patients with very short follow up, did they die? 
+
+```{r aim_2a_2}
+aim_2a_2 <- cohort_covars %>% filter(aim_2a_2, chart_completion) %>% collect()
+
+table1(~age_at_ce + gender + disease_relapse + 
+       disease_relapse_days_since_ce + 
+       ferritin_days_pre + 
+       survival + survival_1yr + survival_3yr + survival_5yr + 
+       death_days_since_ce + #death_days_since_last_transplant +
+       transplant_type + 
+       donor_relation + match_status + 
+       second_transplant + scd_type + 
+       round(last_visit_since_ce/365.25, 1) + 
+       GVHD + vod_subgroup + bacteremia +
+       conditioning_type + has_busulfan + 
+       busulfan_and_vod| ferritin_pre, 
+       data = aim_2a_2, 
+       caption = "Pre-transplant ferritin status",
+       footnote = c("* Missing indicates patients without disease relapse/death"), 
+       render.continuous=my.render.cont)
+```
+
+## Aim_2b: 
+- Percentage of patients who had an episode of bacteremia in iron-overloaded patients vs non-iron overloaded patients 
+- Time to immune reconstitution in iron-overloaded patients vs non-iron overloaded patients
+
+### Aim_2b_1: Post-transplant LIC status 
+- <span style="background-color: #FFFF00">This table only has patients with complete chart reviews AND verifiable LIC unit conversions </span
+```{r aim_2b_1}
+aim_2b_1 <- cohort_covars %>% filter(aim_2b_1, !is.na(LIC_level), LIC_type == "post-transplant", chart_completion) %>% collect() 
+
+table1(~disease_relapse + disease_relapse_days_since_ce + death_days_since_ce + 
+       LIC_days_since_transplant +
+       survival + 
+       survival_1yr + survival_3yr + survival_5yr + 
+       CD3_reconstitution + CD4_reconstitution + CD8_reconstitution + IgM_reconstitution + 
+       vod + GVHD + 
+      # death_days_since_last_transplant +
+      bacteremia| LIC_level, 
+      data = aim_2b_1,
+      caption = "Post-transplant LIC status (Only patients with completed chart reviews AND verifiable LIC unit conversions)",
+      footnote = c("* Missing indicates patients without disease relapse/death"))
+```
+
+### Aim_2b_2: Post-transplant ferritin status
+- <span style="background-color: #FFFF00">This table only has patients with complete chart reviews </span>
+```{r aim_2b_2}
+aim_2b_2 <- cohort_covars %>% filter(aim_2b_2, chart_completion) %>% collect() 
+
+table1(~disease_relapse + 
+       disease_relapse_days_since_ce + 
+       ferritin_days_post + 
+       survival + 
+       death_days_since_ce + 
+       survival_1yr + survival_3yr + survival_5yr + 
+       CD3_reconstitution + CD4_reconstitution + CD8_reconstitution + IgM_reconstitution + 
+       GVHD + vod_subgroup + 
+      # death_days_since_last_transplant +
+      bacteremia| ferritin_post, 
+      data = aim_2b_2,
+      caption = "Post-transplant ferritin status",
+      footnote = c("* Missing indicates patients without disease relapse/death"))
+```
+
+## Aim 3: Post-transplant iron reduction therapy (IRT) 
+- Percentage of patients requiring post-transplant IRT 
+- Percentage of patients receiving IRT with chelation compared to phlebotomy 
+- Rate of ferritin reduction for patients receiving IRT with chelation vs phlebotomy (ng/ml/month) 
+```{r aim_3}
+aim_3 <- cohort_covars %>% filter(aim_3_2 | aim_3_1) %>%
+          filter(!is.na(ferritin_post)) %>%
+          mutate(overhead = "Post-transplant ferritin levels")
+label(aim_3$IRT) = "Post-transplant iron reduction therapy"
+table1(~IRT| overhead*ferritin_post, 
+      data = aim_3,
+      # caption = "Post-transplant ferritin levels",
+      overall = FALSE)
+```
+
+# Overall statistics: 
+- 01_0064_cr, 01_0113 (cchmc) met all criteria but was excluded for some other reasons
+- 08_0017 (stanford): Quantitative liver iron assessment is nondiagnostic due to respiratory motion.
+- Most cases were excluded because patients had leukemia and received transplant not for the disaese of interest.
+
+## False positive patients by site:
+```{r false_positves_by_site}
+false_pos <- results_tbl("false_positive_ids")
+
+false_pos %>% distinct(person_id) %>% inner_join(results_tbl("scd_dx") %>% 
+                        distinct(person_id, site), by = c("person_id")) %>% 
+               group_by(site) %>% summarise(num = n()) %>% 
+               ungroup() 
+
+false_pos %>% copy_to_new(df=., name = "false_pos") %>%
+      inner_join(results_tbl("leukemia_dx_px"), by = "person_id") %>% distinct_ct()
+```
+
+### Disease counts for false positive and true positive patients:
+- Even though a few codes only generated false positive cases, it was just a single instance. Patients might have been ineligible for the cohort for other reasons. 
+
+```{r false_positives_by_scd_name}
+# false_positve vs true positive counts
+results_tbl("scd_dx") %>% distinct(person_id, scd_concept_name) %>%
+        left_join(false_pos %>% distinct(person_id) %>%
+                        mutate(false_pos_ct = 1), by = "person_id") %>%  
+        # group_by(scd_concept_name) %>%
+        # summarise(false_pos_ct = sum(false_pos_ct, na.rm = TRUE)) %>% ungroup() %>% 
+        collect() %>%
+        left_join(cohort_covars %>% filter(chart_completion) %>% 
+                  distinct(person_id) %>% 
+                  mutate(true_pos_ct = 1), by = "person_id") %>%
+        group_by(scd_concept_name) %>%
+        summarise(true_pos_ct = sum(true_pos_ct, na.rm = TRUE),
+                false_pos_ct = sum(false_pos_ct, na.rm = TRUE)) %>% ungroup() %>%
+        filter(true_pos_ct > 0 | false_pos_ct > 0) %>%
+        arrange(desc(false_pos_ct), scd_concept_name) %>%
+        prettify_kable()
+```
+
+### False positive patients by transplant procedures
+- The procedure codes were reviewed by Nora before data curation. 
+```{r false_positives_by_transplant_code}
+# false_pos %>% inner_join(results_tbl("no_multi_transplant_px") %>%
+#                             distinct(transplant_concept_name, person_id), by = "person_id") %>%
+#                             group_by(transplant_concept_name) %>%
+#                             summarise(num = n_distinct(person_id)) %>% arrange(desc(num)) %>% prettify_kable()
+                            
+results_tbl("study_cohorts") %>% distinct(person_id, transplant_concept_name) %>%
+        left_join(false_pos %>% distinct(person_id) %>%
+                        mutate(false_pos_ct = 1), by = "person_id") %>%  
+        # group_by(scd_concept_name) %>%
+        # summarise(false_pos_ct = sum(false_pos_ct, na.rm = TRUE)) %>% ungroup() %>% 
+        collect() %>%
+        left_join(cohort_covars %>% filter(chart_completion) %>% 
+                  distinct(person_id) %>% 
+                  mutate(true_pos_ct = 1), by = "person_id") %>%
+        group_by(transplant_concept_name) %>%
+        summarise(true_pos_ct = sum(true_pos_ct, na.rm = TRUE),
+                false_pos_ct = sum(false_pos_ct, na.rm = TRUE)) %>% ungroup() %>%
+        filter(true_pos_ct > 0 | false_pos_ct > 0, !is.na(transplant_concept_name) ) %>%
+        arrange(desc(false_pos_ct), transplant_concept_name) %>%
+        prettify_kable()
+```
+
+## False negative patients at CHOP
+- There are 14 false negative patients from CHOP for the following reason:
+  - 1 patient is in our transplant cohort but not the disease cohort because we missed out 1 condition code for Beta thalassemia (concept_id = 4278669). 
+  - 13 patients had the following procedure codes that were not included
+  - We could include the false negative patients from CHOP and other site; however, this requires moving the study schema to a new version of the database. Need to check with Charlie for the optimal solutions. 
+```{r false_negative_patients}
+read.csv("../local/missing_px_codes.csv") %>%
+  mutate(procedure_concept_id = as.character(procedure_concept_id)) %>% 
+  prettify_kable()  
+```
+  
+## True positives patients with more than one disease subgroup: 
+```{r multi_disease_subgroup_ct_1}
+# patients with more than 1 disease type
+multi_subgroups <- results_tbl("scd_dx") %>% group_by(person_id) %>% 
+                        summarise(subgroup_ct = n_distinct(scd_type)) %>% 
+                        filter(subgroup_ct > 1) %>% ungroup() %>%
+                        inner_join(cohort_covars %>% distinct(person_id, record_id, chart_completion) %>% copy_to_new(df=., name = "njh"), by = "person_id") 
+multi_subgroups_resolved_ct <- read.csv("../local/multi_subgroup_resolved.csv") %>% distinct_ct()
+```
+
+- The true positives count only include patients in aim 2a & 2b. The overall cohort has `r cohort_covars %>% distinct_ct()` patients. 
+- Only considered true positive patients in this table. 
+  - `r multi_subgroups %>% filter(chart_completion) %>% distinct_ct("person_id")` true positive patients from chart review with more than 1 disease subgroup. 
+  - `r multi_subgroups %>% distinct_ct("person_id")` true positive patients & patients from aim 3 with more than 1 disease subgroup. 
+  - By filtering by problem lists, date of diagnosis, number of diagnosis, we were able to resolve `r multi_subgroups_resolved_ct` cases. 
+```{r multi_disease_subgroup_ct_2}
+# multi_subgroups %>% inner_join(results_tbl("scd_dx") , by = "person_id") %>% 
+#                 distinct(record_id, scd_concept_name, scd_type) %>% 
+#                 arrange(record_id, scd_concept_name) %>% prettify_kable()
+```
+
+## True positives patients with more than one disease diagnosis: 
+```{r multi_disease_ct_1}
+# patients with more than 1 disease type
+multi_disease <- results_tbl("scd_dx") %>% group_by(person_id) %>% 
+                        summarise(disease_ct = n_distinct(scd_concept_name)) %>% 
+                        filter(disease_ct > 1) %>% ungroup() %>%
+                        inner_join(cohort_covars %>% filter(chart_completion) %>% distinct(person_id, record_id) %>% copy_to_new(df=., name = "njh"), by = "person_id") 
+```
+- Only considered true positive patients in this table:
+  -  `r multi_disease %>% distinct_ct("person_id")` patients with more than 1 disease diagnosis. 
+```{r multi_disease_ct_2}
+# multi_disease %>% inner_join(results_tbl("scd_dx") , by = "person_id") %>% 
+#                 distinct(record_id, scd_concept_name, scd_type) %>% 
+#                 arrange(record_id, scd_concept_name) %>% prettify_kable()
+```
+
+## VOD status:
+- Refer to variable definition sections for the category code, the majority of VOD cases met the first definition. Introducing the other definition makes little impact. 
+```{r vod_status}
+vod <- results_tbl("covar_vod_dx") %>% 
+        inner_join(results_tbl("analytics_dataset") %>%
+                    filter(eligibility == "Yes", chart_completion) %>% 
+                    select(person_id, transplant_date), by = "person_id") %>%
+        mutate(vod_date := pmin(min_defi_abd_date, min_bili_abd_date, min_bili_abd_weight_date, na.rm = TRUE)) %>%
+        collect() %>% filter(as.numeric(difftime(vod_date, transplant_date, units = "days")) <= 90 |
+                                (vod_date >= transplant_date) | 
+                                abs(as.numeric(difftime(abd_date, transplant_date, units = "days"))) <= 7) %>% 
+        distinct(person_id, vod_cat_1, vod_cat_2, vod_cat_3, vod_cat_4, vod_cat_5, vod) 
+vod %>% filter(!is.na(vod_cat_1)| !is.na(vod_cat_3)| !is.na(vod_cat_4)| !is.na(vod_cat_5)) %>%
+group_by(vod_cat_1, vod_cat_2, vod_cat_3, vod_cat_4, vod_cat_5) %>% 
+                 summarise(n_patients = n_distinct(person_id)) %>% ungroup() %>% 
+                 mutate(across(starts_with("vod_cat"), ~if_else(!is.na(.x), "Yes", "No"))) %>% prettify_kable()
+```
+
+## match status, donor relation, and transplant type for aim_2a
+```{r match_status}
+results_tbl("analytics_dataset") %>%
+        filter(aim_2a_1|aim_2a_2) %>%
+        filter(eligibility == "Yes", chart_completion) %>%
+        group_by(match_status, donor_relation, transplant_type) %>%
+        summarise(n = n_distinct(person_id)) %>% 
+        prettify_kable()
+```

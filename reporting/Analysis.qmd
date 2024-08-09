@@ -1,5 +1,5 @@
 ---
-title: "The Effects of Iron Overload on Hemptotic Stemcell Transplant (HSCT) Outcomes in Sickle Cell Patients"
+title: "Statistical analysis: The Effects of Iron Overload on Hemptotic Stemcell Transplant (HSCT) Outcomes in Sickle Cell Patients"
 author: "Nhat Nguyen \n PEDSnet Coordinating Center"
 date: "`r format(Sys.time(), '%B %d, %Y')`"
 format:
@@ -16,7 +16,7 @@ format:
     toc-location: left
     number-sections: TRUE
     number-depth: 3
-    output-file: analysis
+    output-file: Gibson_sickle_cell_statisical_analysis
     output-ext: "html"
 ---
 
@@ -38,6 +38,12 @@ require(stringr)
 require(tibble)
 require(ggplot2)
 require(table1)
+require(tidyverse)
+library(survival)
+library(survminer)
+library(ggsurvfit)
+library(gtsummary)
+library(cowplot)
 ```
 
 ```{r funtioncs, include=FALSE}
@@ -64,6 +70,10 @@ prettify_kable <- function(data) {
   rslt
 }
 
+my.render.cont <- function(x) {
+    with(stats.apply.rounding(stats.default(x), digits=2), c("",
+        "Median [Min, Max]"=sprintf("%s [%s, %s])", MEDIAN, MIN, MAX)))
+}
 ```
 
 ```{r echo=FALSE, message=FALSE, warning=FALSE, paged.print=FALSE}
@@ -78,152 +88,14 @@ tribble( ~Item, ~Value,
 cohort <- results_tbl("study_cohorts") %>%
                     pivot_longer(cols = aim_2a_2:aim_3_2, names_to = "aim", values_to = "which_aim") %>% 
                     filter(which_aim == TRUE) %>% 
-                    mutate(transplant_type = case_when(grepl("allogeneic", transplant_concept_name, ignore.case = TRUE) ~ "allogeneic",
-                                              grepl("autologous", transplant_concept_name, ignore.case = TRUE) ~ "autologous",
-                                              TRUE ~ "unknown")) %>% 
-                    select(person_id, aim, site, age_at_ce , gender, scd_concept_id, scd_concept_name, scd_type, transplant_concept_id, transplant_concept_name, transplant_type, transplant_date)
+                    collect() %>%
+                    mutate(age_at_ce = round(as.numeric(difftime(transplant_date, birth_date, units = "days"))/365.25)) %>%
+                    # mutate(transplant_type = case_when(grepl("allogeneic", transplant_concept_name, ignore.case = TRUE) ~ "allogeneic",
+                    #                           grepl("autologous", transplant_concept_name, ignore.case = TRUE) ~ "autologous",
+                    #                           TRUE ~ "unknown")) %>% 
+                    select(person_id, aim, site, age_at_ce , gender, scd_concept_name, scd_type, transplant_concept_name, transplant_type, transplant_date)
 cohort_ct <- cohort %>% distinct_ct()
 ```
-
-**Confidentiality:** Please treat the contents of this report as confidential, and do not redistrubute beyond PEDSnet staff and the requester.
-
-# Cohort Definition
-
--   **Time Anchors:** The specific details of cohort formation are described below. Note that for dates, we use notation to indicate time, where 0 refers to the day that a patient enters the cohort, a positive integer refers to the number of days after the cohort entrance that the observation period lasts, a negative interger refers to the number of days before the cohort entrance that the observation period lasts, oo refers to the end of the study period, and -oo refers to the beginning of the study period.
-
--   **Study period:** 1/1/2010 – 6/30/2023, specifically:
-    - Aim 2a: 1/1/2010 – 6/30/2023
-    - Aim 2b & 3: 1/1/2010 – 12/31/2022
-
--   **Cohort entrance date:** Date of first transplant
-
--   **Follow-up window:** 
-    - Interval during which outcome(s) of interest may be included in the analysis: [-365, 00].
-    - Exposures of interest (LIC, ferritin) for Aims 2a can be observed from -365 days to 0.
-    - Exposures of interest (LIC, ferritin) for Aims 2b and 3 can be observed from day +90 to +365.
-    - Exposures of interest (deferasirox or deferoxamine prescription, phlebotomy procedure) for Aim 3 can be observed from day +90 to 00. 
-    - Outcomes of interest for Aim 2a can be observed from day 0 to 00 
-    - Outcomes of interest for Aim 2b can be observed from date of post-transplant LIC or ferritin to 00. 
-    - Outcomes of interest for Aim 3 can be observed from date of prescription of deferasirox or deferoxamine to 00, or date of first phlebotomy to 00
-
--   **Inclusion/exclusion criteria:** 
-    - Aim 1: Pre-HSCT iron overload: Exclude patients who do not have either a pre-HSCT ferritin or LIC. Post-HSCT iron overload: exclude patients who do not have an LIC or ferritin 6-12 months after HSCT. 
-    - Aim 2a: Include patients whose first transplant between 1/1/2010 – 6/30/2023. Exclude patients who do not have either a pre-HSCT ferritin or LIC. 
-    - Aim 2b and 3: Include patients whose first transplant between 1/1/2010 – 12/1/2022. Exclude patients who do not have an LIC or ferritin 6-12 months after HSCT. 
-    - Aim 3: Exclude patients who did not require post-transplant chelation or phlebotomy.
-
-# Conditions and Procedure Codesets:
--   A compehensive code search was performed for all the conditions, procedures, and measurements specified in the DAP. The list of codesets could be found [here](https://chop365.sharepoint.com/teams/RSCH-ACRC/Shared%20Documents/Forms/AllItems.aspx?id=%2Fteams%2FRSCH%2DACRC%2FShared%20Documents%2FPEDSnet%2FPEDSnet%20Studies%2FActive%20Studies%2FGibson%5FIron%20Overload%2FQueries%2FCodesets%5F2024Feb27&viewid=fbc819dd%2Dfbe7%2D4805%2Da6fc%2D03eda92856f5).
-
-
-# Result Summary
-
-- <span style="background-color: #FFFF00"> This version of the report only include patients with verifiable transplant dates</span>. Additional patients could be added as chart review data come in. 
-
-- The cohort comprises `r format(cohort_ct, big.mark = ",")` patients from `r summarise(cohort, ct = n_distinct(site)) %>% pull(ct)` PEDSnet sites for all 3 Aims.
-    - Chart review data will include `r cohort %>% filter(aim != "aim_3_1", aim != "aim_3_2") %>% distinct_ct()` patients from aim 2a and 2b of this cohort and an additional n = 16 patients whose transplant dates and number of transplants were not verifiable from EHR data. 
-
-## PEDSnet site attrition
-<!-- need to filter out invalid measurements to aim size matches below --> 
-```{r site_strat}
-cohort %>% group_by(site, aim) %>% 
-  summarize(no_persons = n_distinct(person_id)) %>% ungroup() %>% collect() %>%
-    # mutate(cohort_size = if_else(cohort_size < 11L, "<11", as.character(cohort_size))) %>%
-  pivot_wider(names_from = aim, values_from = no_persons) %>% 
-  mutate(site_total = rowSums(select(., contains("aim")), na.rm = TRUE)) %>% 
-  prettify_kable()
-```
-
-```{r attrition, echo=FALSE}
-  # cohort_2a_1 %>% mutate(cohort = "Aim 2a.1") %>% select(person_id, cohort) %>%
-  #               bind_rows(cohort_2a_2 %>% mutate(cohort = "Aim 2a.2") %>% select(person_id, cohort)) %>% 
-  #               bind_rows(cohort_2b_1 %>% mutate(cohort = "Aim 2b.1") %>% select(person_id, cohort)) %>% 
-  #               bind_rows(cohort_2b_2 %>% mutate(cohort = "Aim 2b.2") %>% select(person_id, cohort)) %>% 
-  #               bind_rows(cohort_3_1 %>% mutate(cohort = "Aim 3.1") %>% select(person_id, cohort)) %>% 
-  #               bind_rows(cohort_3_2 %>% mutate(cohort = "Aim 3.2") %>% select(person_id, cohort)) %>% 
-  #               group_by(cohort) %>% 
-  #               summarise(persons = n_distinct(person_id)) %>% 
-  #               mutate(persons = if_else(persons<11, "<11", as.character(persons))) %>%
-  #               prettify_kable()
-
-
-
-
-# DBI doesn't have a good way to interrogate tables in a specified schema,
-# so you have to list the step logs you want to summarise (e.g. DCC + remote
-# sites).
-# step_log <- list(config('qry_site')) %>%
-#   map(.f = function(x) {
-#     get_results(paste0(x, '_steps'))
-#   }) %>%
-#   reduce(.f = dplyr::union)
-# 
-# step_log %>%
-#   arrange(stamp) %>%
-#   select(cohort, persons) %>%
-#   mutate(persons = if_else(persons > 0L & persons < 11L,
-#                            as.integer(NA), as.integer(persons))) %>%
-#   mutate(percent_prior = round(100 * persons /
-#                                  coalesce(lag(persons), persons), 2)) %>%
-#   prettify_kable()
-```
-
-## Demographics
-
-```{r demog, echo=FALSE}
-
-# cohort %>% group_by(gender) %>% summarise(persons = n_distinct(person_id)) %>% 
-#             mutate(perc = paste0(round(persons/ct*100, 2), " %")) %>% prettify_kable()
-
-cohort <- cohort %>% collect() %>% mutate(age_group = case_when(age_at_ce < 5 ~ "[0, 5)",
-                                            age_at_ce < 10 ~ "[5, 10)",
-                                            age_at_ce < 15 ~ "[10, 15)",
-                                            age_at_ce < 20 ~ "[15, 20)",
-                                            age_at_ce < 40 ~ "[20, 40)",
-                                            TRUE ~ "40+"),
-                            age_group = factor(age_group, levels = c("[0, 5)","[5, 10)","[10, 15)",
-                                                                  "[15, 20)", "[20, 40)", "40+")),
-                            scd_type = case_when(scd_type == "aa" ~ "aplastic anemia", 
-                                                scd_type == "bta" ~ "beta thalassemia major", 
-                                                scd_type == "dba" ~ "Diamond-Blackfan anemia",
-                                                scd_type == "scd" ~ "sickle cell disease",
-                                                TRUE ~ NA)) 
-label(cohort$age_group) = "Age at first transplant"
-label(cohort$gender) = "Gender"
-label(cohort$transplant_type) = "Type of transplant"
-label(cohort$scd_type) = "Type of scd"
-
-table1(~gender + age_group + transplant_type + scd_type, data = cohort %>% distinct(person_id, transplant_date, .keep_all = TRUE))
-
-# c_names <- vocabulary_tbl('concept') %>%
-#   filter(domain_id %in% c('Gender', 'Race', 'Ethnicity')) %>%
-#   select(concept_id, concept_name) %>% collect()
-# 
-# demog <- cdm_tbl('person') %>%
-#   semi_join(distinct(cohort, person_id),
-#             by = 'person_id', copy = TRUE) %>% collect() %>%
-#   inner_join(select(c_names, concept_id, sex = concept_name),
-#              by = c('gender_concept_id' = 'concept_id')) %>%
-#   inner_join(select(c_names, concept_id, race = concept_name),
-#              by = c('race_concept_id' = 'concept_id')) %>%
-#   inner_join(select(c_names, concept_id, hispanic = concept_name),
-#              by = c('ethnicity_concept_id' = 'concept_id')) %>%
-#   select(person_id, sex, race, hispanic)
-# 
-# h_cts <- demog %>% group_by(sex, hispanic) %>% summarise(persons = n()) %>%
-#   mutate(persons = if_else(persons > 0L & persons < 11L,
-#                            as.integer(NA), as.integer(persons))) %>%
-#   pivot_wider(names_from = sex, values_from = persons) %>% rename(group = hispanic)
-# r_cts <- demog %>% group_by(sex, race) %>% summarise(persons = n()) %>%
-#   mutate(persons = if_else(persons > 0L & persons < 11L,
-#                            as.integer(NA), as.integer(persons))) %>%
-#   pivot_wider(names_from = sex, values_from = persons) %>% rename(group = race)
-# 
-# prettify_kable(r_cts)
-# prettify_kable(h_cts)
-
-```
-
 # Data analysis plan:
 - This is a retrospective cohort study comparing outcomes between patients with pre/post-HSCT iron overload to patients without pre/post-HSCT iron overload. Analyze the impact of pre/post-HSCT elevated ferritin and LIC on short-term hematologic and transplant-related outcome: 
   - overall survival
@@ -234,135 +106,241 @@ table1(~gender + age_group + transplant_type + scd_type, data = cohort %>% disti
   - immune reconstitution
   - time to neutrophil and platelet engraftment. 
 
-## Descriptive analysis: 
-### Aim_2a: 
-- Percentage of overall survival in iron-overloaded patients vs non-iron overloaded patients 
-- Percentage of patients who experienced disease relapse in iron-overloaded patients vs non-iron overloaded patients 
-- Percentage of patients with GVHD in iron-overloaded patients vs non-iron overloaded patients 
-- Percentage of patients with VOD in iron-overloaded patients vs non-iron overloaded patients 
-- Neutrophil engraftment times in iron-overloaded patients vs non-iron overloaded patients 
-- Platelet engraftment times in iron-overloaded patients vs non-iron overloaded patients 
-
-### Aim_2b: 
-- Percentage of patients who had an episode of bacteremia in iron-overloaded patients vs non-iron overloaded patients 
-- Time to immune reconstitution in iron-overloaded patients vs non-iron overloaded patients 
-
-### Aim 3:  
-- Percentage of patients requiring post-transplant IRT 
-- Percentage of patients receiving IRT with chelation compared to phlebotomy 
-- Rate of ferritin reduction for patients receiving IRT with chelation vs phlebotomy (ng/ml/month) 
-
-## Statistical Analysis
-- GRFS: Time-to-event analysis with Cox proportional hazards model, Kaplan-Meier curves with log-rank test 
-- Overall survival: Time-to-event analysis using Cox proportional hazard model and Kaplan-Meier curve with log-rank test.  
-- Disease relapse: Time-to-event analysis using Cox proportional hazard model and Kaplan-Meier curve with log-rank test.  
+# Aim_2a: 
+- GRFS (Graft failure free, GVHD-free survival survival): Time-to-event analysis with Cox proportional hazards model, Kaplan-Meier curves with log-rank test 
 - GVHD: Time-to-event analysis using Cox proportional hazard model and Kaplan-Meier curve with log-rank test.  
+- Disease relapse: Time-to-event analysis using Cox proportional hazard model and Kaplan-Meier curve with log-rank test.  
 - VOD: Multivariable logistic regression with stratification for busulfan conditioning, use interaction term for busulfan and iron score 
 - Time to neutrophil and platelet engraftment: time-to-event analysis using a competing risks analysis. Competing risks include death or graft failure prior to engraftment. 
 - Bacteremia within 1 year after HSCT: Time-to-event analysis using a competing risks analysis. Competing risk includes death. 
-- Immune Reconstitution: Definition of immune reconstitution: CD3 count >500, CD4 count >200, CD8 count >200, IgM >25. 
-- Statistical analysis: time-to-event analysis using a competing risks analysis. Competing risks include death and graft failure requiring a second transplant. 
+- Immune Reconstitution: time-to-event analysis using a competing risks analysis. Competing risks include death and graft failure requiring a second transplant. 
 
-# Aim 2_1:
-## Aim 2a_2: Pre-transplant ferritin status
-```{r aim_2a_2}
+## Background:
+- Armand et al 2007:
+  - n = 590, follow-up times = 8yrs since transplant
+  - Disease: acute leukemia, MDS, chronic myelogenous leukemia CML, non-Hodgkin lymphoma NHL. 
+  - Ferritin_threshold = 2034 ng/mL: significant negative association between ferritin levels and OS and disease-free survival (DFS) for MDS and acute leukemia. For MDS, an independent significant association between higher ferritin levels and increased treatment-related mortality (TRM). No significant effects observed for CML or NHL
+- Armand et al 2012: 
+  - n = 45
+  - Disease: acute leukemia (acute myelogenous leukemia (AML), acute lymphoblastic leukemia (ALL)) and myelodyplastic syndrome (MDS)
+  - LIC_threshold = 5 (g/gdw): higher LIC level is associated with higher 1-yr OS and lower 2-yr OS but not significant. Using threshold of 3 or 7 did not change the results. 
+  - Ferrintin_threshold = 2000 ng/ml: higher baseline ferritin level is significantly associated with lower OS at both 1-yr and 2-yr post-transplant. However, neither the association between baseline ferritin and cummulative incidence of relapse (CIR) nor non-relapse mortality (NMR) is significant. 
+  - The authors suggested that ferritin rather than LIC is prognostic in this case not because it measures iron stores more accurately but because it's an acute phase reactants (such as albumin or C-reactie protein) which reflects inflammatory status from comorbid conditions, advance diseases, etc..  
+- Armand et al 2014:
+  - Meta-analysis from 4 published cohorts n = 274 with AML and MDS
+  - They looked at the correlation between SF and LIC, and SF of 2500 ng/mL corresponds to an LIC around 6mg/gdw
+  - 2 thresholds for each variables LIC 5 & 7 g/gdw, and SF 1000 and 2500 ng/mL. 
+  - No siginificant association between SF or LIC and OS or TRM observed for thresholds of 7 and 1000, respectively in all 4 cohorts. 
+  - In the pooled cohort, no siginificant association between LIC and OS or TRM observed for LIC threshold of 7. The association between SF and OS is only significant at 1000ng/mL but not at 2500ng/mL. The authors suggested that the drop in OS was not atributted to the elevated iron level but rather the underlying disease that causes the iron level elevation. If this were true, a threshold of 1000ng/mL for SF is a better choice since it allows us to better capture the individuals at risk. 
+- Lee et al 2009:
+  - Retrospective study, n = 101
+  - Diseases: ALL, AML, MDS, aplastic anemia AA. 
+  - SF_threshold = 1000 ng/mL: significant association between elevated SF and OS, DFS, and TMR. 
+  - Had a third group: patients whose SF dropped to below 1000ng/mL after iron-chelating therapy (IC group)
+- Wermke et al 2012:
+  - n = 88
+  - Diseases: AML and MDS
+  - Significant correlation between SF and LIC (r = 0.782). 
+  - SF_threshold = 2500 ng/mL and LIC_threshold = 125ng/mL: the results are very interesting: 
+    - Elevated LIC but not ferritin is significantly associated with lower OS and NRM. 
+- Important covariates:
+  - History of transplant: we would not have this info if the patients changed their care sites. However, chart reviewers should have caught this? Is it in the cohort eligibility? 
+
+## Aim 2a-2: Overall survival stratified by <span style="color:red">pre-transplant ferritin levels</span> using <span style="color:red">univariate analysis</span> 
+```{r cohort_covars_data}
 source("../code/EDA.R")
-aim_2a_2 <- cohort_covars %>% filter(aim == "aim_2a_2") %>%
-  mutate(death = if_else(death == TRUE, "Death", "Alive"), 
-        disease_relapse_days_since_ce = as.numeric(difftime(disease_relapse_date, transplant_date, units = "days")))
-label(aim_2a_2$disease_relapse) = "Disease relapse"
-label(aim_2a_2$disease_relapse_days_since_ce) = "No days since ce until disease relapse*"
-label(aim_2a_2$death) = "Overall survival"  
-label(aim_2a_2$death_days_since_ce) = "No days since ce until death"
-label(aim_2a_2$death_days_since_last_transplant) = "No days since disease relapse until death*"
-label(aim_2a_2$GVHD) = "Graft-versus-host disease (GvHD)"
-label(aim_2a_2$VOD) = "Incidence of veno-occlusive disease (VOD)"
-label(aim_2a_2$bacteremia) = "Bacteremia**"
 
-table1(~death + death_days_since_ce + 
-      disease_relapse + disease_relapse_days_since_ce + 
-      death_days_since_last_transplant +
-      GVHD + VOD + bacteremia| ferritin_level, 
-      data = aim_2a_2,
-      footnote = c("* Missing indicates patients without disease relapse/death", 
-                  "** Missing indicates no culture test was found, No means a negative result was reported"))
+cohort_covars <- cohort_covars %>% collect() %>%
+  mutate(#survival = if_else(survival, "Alive", "Death"), 
+         #censoring status 0=censored, 1=dead
+         survival_1yr = if_else(death_days_since_ce > 365.25 | is.na(death_days_since_ce), FALSE, TRUE),
+         survival_time_1yr_censored = case_when(death_days_since_ce <= 365.25 ~ death_days_since_ce, 
+                                                death_days_since_ce > 365.25 ~ 365.25,
+                                                is.na(death_days_since_ce) & !is.na(last_in_person_visit_since_ce) ~ pmin(last_in_person_visit_since_ce, 365.25, na.rm = TRUE),
+                                                TRUE ~ NA_real_),
+         survival_3yr = if_else(death_days_since_ce > 365.25*3 | is.na(death_days_since_ce), FALSE, TRUE),
+         survival_time_3yr_censored = case_when(death_days_since_ce <= 365.25*3 ~ death_days_since_ce, 
+                                                death_days_since_ce > 365.25*3 ~ 365.25*3,
+                                                is.na(death_days_since_ce) & !is.na(last_in_person_visit_since_ce) ~ pmin(last_in_person_visit_since_ce, 365.25*3, na.rm = TRUE),
+                                                TRUE ~ NA_real_),
+        survival_5yr = if_else(death_days_since_ce > 365.25*5 | is.na(death_days_since_ce), FALSE, TRUE),
+        survival_time_5yr_censored = case_when(death_days_since_ce <= 365.25*5 ~ death_days_since_ce, 
+                                               death_days_since_ce > 365.25*5 ~ 365.25*5, 
+                                               is.na(death_days_since_ce) & !is.na(last_in_person_visit_since_ce) ~ pmin(last_in_person_visit_since_ce, 365.25*5, na.rm = TRUE),
+                                               TRUE ~ NA_real_),
+         disease_relapse_days_since_ce = as.numeric(difftime(graft_fail_date, transplant_date, units = "days")),
+         disease_relapse_days_since_ce_5yr_censored = case_when(disease_relapse_days_since_ce <= 365.25*5 ~ disease_relapse_days_since_ce, 
+                                                          is.na(disease_relapse_days_since_ce) & !is.na(last_in_person_visit_since_ce) ~ pmin(last_in_person_visit_since_ce, 365.25*5, na.rm = TRUE),
+                                                TRUE ~ NA_real_),
+         disease_relapse_5yr = if_else(disease_relapse_days_since_ce > 365.25*5 | is.na(disease_relapse_days_since_ce), FALSE, TRUE))
 ```
 
-## Aim 2b_2: Post-transplant ferritin status
-```{r aim_2b_2}
-aim_2b_2 <- cohort_covars %>% filter(aim == "aim_2b_2") %>%
-  mutate(death = if_else(death == TRUE, "Death", "Alive"), 
-        bacteremia = if_else(is.na(bacteremia), "Not Detected", bacteremia), 
-        disease_relapse_days_since_ce = as.numeric(difftime(disease_relapse_date, transplant_date, units = "days")))
-label(aim_2b_2$disease_relapse) = "Disease relapse"
-label(aim_2b_2$disease_relapse_days_since_ce) = "No days since ce until disease relapse*"
-label(aim_2b_2$death) = "Overall survival"  
-label(aim_2b_2$death_days_since_ce) = "No days since ce until death"
-label(aim_2b_2$death_days_since_last_transplant) = "No days since disease relapse until death*"
-label(aim_2b_2$GVHD) = "Graft-versus-host disease (GvHD)"
-label(aim_2b_2$VOD) = "Incidence of veno-occlusive disease (VOD)"
-label(aim_2b_2$bacteremia) = "Bacteremia**"
+```{r aim_2a_2_data}
 
-table1(~death + death_days_since_ce + 
-      disease_relapse + disease_relapse_days_since_ce + 
-      death_days_since_last_transplant +
-      GVHD + VOD + bacteremia| ferritin_level, 
-      data = aim_2b_2,
-      footnote = c("* Missing indicates patients without disease relapse/death"))
-                  # "** Missing indicates no culture test was found, No means a negative result was reported"))
-```
-## Aim 3: Post-transplant iron reduction therapy (IRT)
-```{r aim_3}
-# extract unique patients
-table1(~IRT| ferritin_level, 
-      data = cohort_covars %>% distinct(person_id, transplant_date, .keep_all = TRUE))
+# the way survival is coded here is different from table 1
+aim_2a_2 <- cohort_covars %>% filter(aim_2a_2) %>% 
+  mutate(ferritin_pre = factor(ferritin_pre, levels = c("low", "moderate", "high")),
+         ferritin_pre_max = factor(ferritin_pre_max, levels = c("low", "moderate", "high")))
 ```
 
-# Chart review data: 
-```{r cr_sum}
-cr_data <- read.csv("../redcap/IronOverloadChartRev_DATA_2024-05-02_1145.csv") %>% 
-            # filter out old patient ids
-           filter(!grepl("^[A-Za-z]", record_id))
-total_ct <- cr_data %>% distinct_ct("record_id")
+```{r overall_survival_pre_ferritin}
+# 5-yr survival
+# ggsurvfit::survfit2() returns a survfit object
+# survival::survfit()
+p_ferritin_max_pre <- survfit2(Surv(survival_time_5yr_censored/365.25, survival_5yr) ~      ferritin_pre_max, 
+        data = aim_2a_2 %>% filter(!is.na(survival_time_5yr_censored))) %>% 
+  ggsurvfit() +
+  labs(title = "Pre-transplant MAX ferritin level", 
+    x = "Years",
+    y = "Survival probability") + 
+  ylim(c(0.75, 1)) + 
+  add_confidence_interval() + 
+  add_risktable() # the numbers at risk
+# build plot (which constructs the risktable)
+built_p_ferritin_max_pre <- ggsurvfit_build(p_ferritin_max_pre)
 
-cr_data <- cr_data %>% rename(site = redcap_data_access_group, 
-                        chart_completion = iron_overload_chart_review_complete,
-                        transplant_date = date_tpx,
-                        transplant_type = tpx_type) %>%
-                mutate(transplant_type = case_when(transplant_type == 1 ~ "Allogeneic", 
-                                            transplant_type == 2 ~ "Autologous/Gene therapy", 
-                                            TRUE ~ NA),
-                        chart_completion = if_else(chart_completion == 2, TRUE, FALSE), 
-                        across(iron_date_1:est_method_15, ~if_else(.x == "", NA, .x)),
-                        across(c("transplant_date", "second_transplant_date"), ~if_else(.x == "", NA, .x)),
-                        across(iron_val_1:iron_val_15, ~as.numeric(.x)),
-                        # transplant_date = if_else(transplant_date == "", NA, as.Date(transplant_date)),
-                        eligibility = case_when(is.na(transplant_date ) & is.na(eligibility) ~ 0,
-                                                !is.na(transplant_date ) & is.na(eligibility) ~ 1,  
-                                                TRUE ~ eligibility)) %>%
-                filter(chart_completion) 
-completed_ct <- cr_data %>% distinct_ct("record_id")
-true_positives_ct <- cr_data %>% filter(!is.na(transplant_date)) %>% distinct_ct("record_id")
-false_positives_ct <- cr_data %>% filter(is.na(transplant_date)) %>% distinct_ct("record_id")
+p_ferritin_pre <- survfit2(Surv(survival_time_5yr_censored/365.25, survival_5yr) ~      ferritin_pre, 
+        data = aim_2a_2 %>% filter(!is.na(survival_time_5yr_censored))) %>% 
+  ggsurvfit() +
+  labs(title = "Pre-transplant MOST RECENT ferritin level", 
+    x = "Years",
+    y = "Survival probability") + 
+    ylim(c(0.75, 1)) + 
+  add_confidence_interval() + 
+  add_risktable() # the numbers at risk
+# build plot (which constructs the risktable)
+built_p_ferritin_pre <- ggsurvfit_build(p_ferritin_pre)
+
+cowplot::plot_grid(built_p_ferritin_pre, built_p_ferritin_max_pre, ncol = 2)
 ```
 
-- Total number of chart reviews: `r total_ct`
-- Number of completed chart reviews: `r completed_ct`
-- Number of false positives: `r false_positives_ct`
-- Number of true positives: `r true_positives_ct`
+```{r overall_survival_pre_ferritin_KM_2}
+s1 <- survfit(Surv(survival_time_5yr_censored/365.25, survival_5yr) ~ ferritin_pre, 
+                                data = aim_2a_2 %>% filter(!is.na(survival_time_5yr_censored)))
+s1 %>% 
+  tbl_survfit(
+    times = c(1, 3, 5),
+    label_header = "**{time}-yr survival (95% CI)**",
+    label = "Pre-transplant most recent ferritin level"
+  )
 
-```{r cr_status_by_site}
-cr_data %>% group_by(site, eligibility) %>% 
-      summarise(n = n_distinct(record_id)) %>% ungroup() %>%
-      mutate(eligibility = if_else(eligibility == 0, "false_positives", "true_positives")) %>%
-      pivot_wider(id_cols = site, names_from = eligibility, values_from = n) %>% 
-      prettify_kable()
+s1_max <- survfit(Surv(survival_time_5yr_censored/365.25, survival_5yr) ~ ferritin_pre_max, 
+                                data = aim_2a_2 %>% filter(!is.na(survival_time_5yr_censored)))
+s1_max %>% 
+  tbl_survfit(
+    times = c(1, 3, 5),
+    label_header = "**{time}-yr survival (95% CI)**",
+    label = "Pre-transplant Max ferritin level"
+  )
+
+# comparing survival time between different groups
+logrank_sur_5yr <- survdiff(Surv(survival_time_5yr_censored, survival_5yr) ~ ferritin_pre, 
+          data = aim_2a_2 %>% filter(!is.na(survival_time_5yr_censored)))
 ```
-# Overall statistics: 
-## Counts stratified by transplant concept names: 
-```{r transplant_id_sum}
-results_tbl("study_cohorts") %>% group_by(transplant_concept_id, transplant_concept_name) %>%
-        summarise(n = n_distinct(person_id)) %>% 
-        mutate(transplant_concept_id = as.character(transplant_concept_id)) %>%
-        prettify_kable()
+
+- Overall survival: Time-to-event analysis using Cox proportional hazard model and Kaplan-Meier curve with log-rank test.  
+- Follow-up time for surviving patients is the last in-person visits censored by 5 yrs post-transplant
+- Exclusion: patients without in-person visits following transplants
+- Assumptions:
+  - non-parametric method
+  - univariate analysis
+  - OS was defined as time from transplant (CED) to death of any causes
+- The majority of patients in the low ferritin group stay in the low group using either most recent ferritin or max ferritin values(the left and right curves stay almost the same). By grouping by the max ferritin level, more survival patients shifted from the high to moderate groups (see the difference between the moderate and high groups between the left and right panels). 
+- Using the log-rank test to compare survival times between groups shows that there is **no significant difference acorrding to both most recent and max pre-transplant ferritin levels at 95%CI** (chisq = `r round(logrank_sur_5yr$chisq, 2)`, p = `r round(logrank_sur_5yr$pvalue, 4)`)
+- Using univariate Cox proportional hazard confirms the same result as the KM method, while the moderate ferritin group has a reduced death hazard than the low-ferritin group, and the high-ferritin group has a higher death hazard than the low-ferritin group, none of the ratios were significant at 95%CI.  
+- One interesting is that for the first 5 months following transplant, the high ferritin group has a higher survival. Need to verify this because this violates the proportional hazzard assumptions and we can't use the Cox model. 
+
+```{r overall_survival_pre_ferritin_Cox}
+coxph(Surv(survival_time_5yr_censored, survival_5yr) ~ ferritin_pre, 
+      data = aim_2a_2 %>% filter(!is.na(survival_time_5yr_censored))) %>% 
+  tbl_regression(exp = TRUE)
 ```
+
+## Aim 2a-1: Overall survival stratified by <span style="color:red">pre-transplant ferritin levels</span> using <span style="color:red">multivariate analysis</span>
+```{r overall_survival_preferritin_multivariate}
+# res.cox <- coxph(Surv(survival_time_5yr_censored/365.25, survival_5yr) ~ ferritin_pre + age_at_ce + gender + scd_type, #+ transplant_type 
+#                 data = aim_2a_2 %>% filter(!is.na(survival_time_5yr_censored)))
+# summary(res.cox)
+```
+
+## Aim 2a-1: Disease relapse stratified by <span style="color:red">pre-transplant ferritin levels</span> using <span style="color:red">univariate analysis</span>
+```{r disease_relapse_pre_ferritin_KM_1}
+# 5-yr survival
+# ggsurvfit::survfit2() returns a survfit object
+# survival::survfit()
+print(survfit2(Surv(disease_relapse_days_since_ce_5yr_censored/365.25, disease_relapse_5yr) ~ ferritin_pre, 
+        data = aim_2a_2 %>% filter(!is.na(disease_relapse_days_since_ce_5yr_censored))) %>% 
+  ggsurvfit() +
+  labs(x = "Years",
+    y = "Relapse-free probability") + 
+  add_confidence_interval() +
+  add_risktable()) # the numbers at risk
+```
+
+```{r disease_relapse_pre_ferritin_KM_2}
+relapse_5yr_preferritin <- survfit(Surv(disease_relapse_days_since_ce_5yr_censored/365.25, disease_relapse_5yr) ~ ferritin_pre, 
+        data = aim_2a_2 %>% filter(!is.na(disease_relapse_days_since_ce_5yr_censored)))
+relapse_5yr_preferritin %>% 
+  tbl_survfit(
+    times = c(1, 3, 5),
+    label_header = "**{time}-yr relapse-free (95% CI)**",
+    label = "pre-transplant ferritin level"
+  )
+
+# comparing survival time between different groups
+logrank_relapse_5yr <- survdiff(Surv(disease_relapse_days_since_ce_5yr_censored/365.25, disease_relapse_5yr) ~ ferritin_pre, 
+        data = aim_2a_2 %>% filter(!is.na(disease_relapse_days_since_ce_5yr_censored)))
+```
+
+## Aim 2a_2: Overall survival stratified by <span style="color:red">pre-transplant LIC levels</span> using <span style="color:red">univariate analysis</span> 
+
+<span style="background-color:#FFFF00">How could patients with low- and moderate- LOC levels have a lower survival than high-LIC levels? </span>
+
+```{r aim_2a_1_data}
+aim_2a_1 <- cohort_covars %>% filter(LIC_type == "pre-transplant") %>%
+                filter(!is.na(survival_time_5yr_censored), !is.na(LIC_max_level))
+
+```
+```{r overall_survival_pre_LIC}
+# 5-yr survival
+# ggsurvfit::survfit2() returns a survfit object
+# survival::survfit()
+p_LIC_max_pre <- survfit2(Surv(survival_time_5yr_censored/365.25, survival_5yr) ~      LIC_max_level, 
+        data = aim_2a_1 %>% filter(!is.na(survival_time_5yr_censored), !is.na(LIC_max_level))) %>% 
+  ggsurvfit() +
+  labs(title = "Pre-transplant MAX LIC values", 
+    x = "Years",
+    y = "Survival probability"
+    ) + 
+  add_confidence_interval() + 
+  add_risktable() # the numbers at risk
+# build plot (which constructs the risktable)
+built_p_LIC_max_pre <- ggsurvfit_build(p_LIC_max_pre)
+
+p_LIC_pre <- survfit2(Surv(survival_time_5yr_censored/365.25, survival_5yr) ~ LIC_level, 
+        data = aim_2a_1 %>% filter(!is.na(survival_time_5yr_censored), !is.na(LIC_level))) %>% 
+  ggsurvfit() +
+  labs(title = "Pre-transplant MOST RECENT LIC values", 
+    x = "Years",
+    y = "Survival probability"
+    ) + 
+  add_confidence_interval() + 
+  add_risktable() # the numbers at risk
+# build plot (which constructs the risktable)
+built_p_LIC_pre <- ggsurvfit_build(p_LIC_pre)
+
+cowplot::plot_grid(built_p_LIC_pre, built_p_LIC_max_pre, ncol = 2)
+```
+
+# Aim_2b: 
+- GRFS: Time-to-event analysis with Cox proportional hazards model, Kaplan-Meier curves with log-rank test 
+- Overall survival: Time-to-event analysis using Cox proportional hazard model and Kaplan-Meier curve with log-rank test.  
+- Disease relapse: Time-to-event analysis using Cox proportional hazard model and Kaplan-Meier curve with log-rank test.  
+- GVHD: Time-to-event analysis using Cox proportional hazard model and Kaplan-Meier curve with log-rank test. 
+
+# Address missing data
+
+# Sensitivity analysis
+- Aim 2a and 2b: Subgroup analyses by disease, specifically sickle cell disease 
+- Aim 2a: VOD- stratify outcome by busulfan 
+

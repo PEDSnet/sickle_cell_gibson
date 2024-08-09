@@ -1,0 +1,724 @@
+---
+title: "EDA: The Effects of Iron Overload on Hemptotic Stemcell Transplant (HSCT) Outcomes in Patients with Sickle Cell Disease (scd) and Beta Thalassemia (bta)"
+author: "Nhat Nguyen \n PEDSnet Coordinating Center"
+date: "`r format(Sys.time(), '%B %d, %Y')`"
+format:
+  html:
+    page-layout: full
+    embed-resources: true
+    smooth-scroll: true
+    fig-cap: TRUE
+    df-print: paged
+    toc: TRUE
+    toc-depth: 5
+    toc-collapsed: TRUE
+    toc-float: TRUE
+    toc-location: left
+    number-sections: TRUE
+    number-depth: 3
+    output-file: ASH_abstract
+    output-ext: "html"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, message = FALSE, warning = FALSE, fig.width = 10, fig.height = 6, fig.align = "center")
+# Default taken from R notebook behavior: when knitting, wd will always be location of notebook
+base_dir <- '..'
+Sys.setenv(PEDSNET_SKIP_REQUEST_EXECUTION=1)
+tryCatch(source('../site/run.R'),
+         error = function (e) message(e)) # May not be able to make db connection
+
+# Set to "local" to read data from ../results, or another value to read from db
+data_source <- "not_local" #if_else(config('execution_mode') == 'distribution', 'local', 'not_local')
+
+require(tidyr)
+require(knitr)
+require(kableExtra)
+require(stringr)
+require(tibble)
+require(ggplot2)
+require(table1)
+require(tidyverse)
+library(survival)
+library(survminer)
+library(ggsurvfit)
+library(gtsummary)
+library(cowplot)
+```
+
+```{r functions, include=FALSE}
+get_codesets <- function(codeset_name) {
+  read_csv(paste0('../specs/', codeset_name, '.csv'), col_types = c('c', 'c', 'c', 'c'), show_col_types = FALSE) %>%
+  mutate(concept_id = as.character((concept_id)), concept_code = as.character((concept_code))) %>% collect()
+}
+
+get_results <- function(tbl_name) {
+  if (data_source == 'local') {
+    rslt <- read.csv(paste0('../local/', tbl_name, '.csv'))
+  }
+  else {
+    rslt <- results_tbl(tbl_name) %>% collect()
+  }
+  rslt
+}
+
+prettify_kable <- function(data) {
+  rslt <- data %>% kable(digits = 4, format.args = list(big.mark = ','))
+  if (knitr::is_html_output()) rslt <- rslt %>%
+      kable_styling(bootstrap_options = c("striped", "hover")) %>%
+      column_spec(1, bold = T, border_right = T)
+  rslt
+}
+
+my.render.cont <- function(x) {
+    with(stats.apply.rounding(stats.default(x), digits=2), c("",
+        "Median [Min, Max]"=sprintf("%s [%s, %s])", MEDIAN, MIN, MAX)))
+}
+
+surv_summary <- function(fit){
+  x <- summary(fit)
+  coeff <- as.data.frame(x$conf.int) %>% rownames_to_column(var="covariate") %>%
+      rename(HR = `exp(coef)`, lower_ci = `lower .95`, upper_ci = `upper .95`) %>%
+      mutate(`95% CI for HR` = paste0(round(HR, 2), " (", round(lower_ci, 2), "-", round(upper_ci, 2), ")")) %>%
+      select(covariate, HR, `95% CI for HR`)
+  p_vals <- as.data.frame(x$coefficients) %>% rownames_to_column(var="covariate") %>%
+      select(covariate, coef, p_value = `Pr(>|z|)`)
+  tbl <- coeff %>% inner_join(p_vals, by = "covariate")
+  return(tbl)
+}
+```
+
+```{r echo=FALSE, message=FALSE, warning=FALSE, paged.print=FALSE}
+tribble( ~Item, ~Value,
+         'Title', config('title'),
+         'PI', config('requester_name'),
+         'CDM Version', as.character(config('cdm_version'))) %>%
+  prettify_kable()
+
+```
+```{r data, include= FALSE}
+cohort <- results_tbl("study_cohorts") %>%
+                    select(- scd_concept_name) %>%
+                    pivot_longer(cols = aim_2a_2:aim_3_2, names_to = "aim", values_to = "which_aim") %>% 
+                    filter(which_aim == TRUE) %>%
+                    left_join(results_tbl("multi_subgroup_resolved"), by = "person_id") %>% 
+                    collect() %>%
+                    mutate(scd_type = if_else(!is.na(scd_type.y), scd_type.y, scd_type.x)) %>%
+                    mutate(age_at_ce = round(as.numeric(difftime(transplant_date, birth_date, units = "days"))/365.25)) %>%
+                    # mutate(transplant_type = case_when(grepl("allogeneic", transplant_concept_name, ignore.case = TRUE) ~ "allogeneic",
+                    #                           grepl("autologous", transplant_concept_name, ignore.case = TRUE) ~ "autologous",
+                    #                           TRUE ~ "unknown")) %>% 
+                    select(person_id, record_id, aim, site, age_at_ce , gender, scd_type, transplant_concept_name, transplant_type, transplant_date) %>%
+                    filter(scd_type == "scd" | scd_type == "bta")
+                    
+cohort_ct <- cohort %>% distinct_ct()
+```
+**Confidentiality:** Please treat the contents of this report as confidential, and do not redistrubute beyond PEDSnet staff and the requester.
+
+# Cohort Definition
+
+-   **Time Anchors:** The specific details of cohort formation are described below. Note that for dates, we use notation to indicate time, where 0 refers to the day that a patient enters the cohort, a positive integer refers to the number of days after the cohort entrance that the observation period lasts, a negative interger refers to the number of days before the cohort entrance that the observation period lasts, oo refers to the end of the study period, and -oo refers to the beginning of the study period.
+
+-   **Study period:** 1/1/2010 – 6/30/2023, specifically:
+    - Aim 2a: 1/1/2010 – 6/30/2023
+    - Aim 2b & 3: 1/1/2010 – 12/31/2022
+
+-   **Cohort entrance date:** Date of first transplant
+
+-   **Follow-up window:** 
+    - Interval during which outcome(s) of interest may be included in the analysis: [-365, 00].
+    - Exposures of interest (LIC, ferritin) for Aims 2a can be observed from -365 days to 0.
+    - Exposures of interest (LIC, ferritin) for Aims 2b and 3 can be observed from day +90 to +365.
+    - Exposures of interest (deferasirox or deferoxamine prescription, phlebotomy procedure) for Aim 3 can be observed from day +90 to 00. 
+    - Outcomes of interest for Aim 2a can be observed from day 0 to 00 
+    - Outcomes of interest for Aim 2b can be observed from date of post-transplant LIC or ferritin to 00. 
+    - Outcomes of interest for Aim 3 can be observed from date of prescription of deferasirox or deferoxamine to 00, or date of first phlebotomy to 00
+
+-   **Inclusion/exclusion criteria:** 
+    - Aim 1: Pre-HSCT iron overload: Exclude patients who do not have either a pre-HSCT ferritin or LIC. Post-HSCT iron overload: exclude patients who do not have an LIC or ferritin 6-12 months after HSCT. 
+    - Aim 2a: Include patients whose first transplant between 1/1/2010 – 6/30/2023. Exclude patients who do not have either a pre-HSCT ferritin or LIC. 
+    - Aim 2b and 3: Include patients whose first transplant between 1/1/2010 – 12/1/2022. Exclude patients who do not have an LIC or ferritin 6-12 months after HSCT. 
+    - Aim 3: Exclude patients who did not require post-transplant chelation or phlebotomy.
+
+# Variable definition:
+- **LIC level**:
+  - Low: <5 mg Fe/g dry wt
+  - Moderate: [5, 10] mg Fe/g dry wt
+  - High: >10 mg Fe/g dry wt
+  - Binary classification: Low: <7 mg Fe/g dry wt and High otherwise
+- **Ferritin level**:
+  - Low: <1000 ng/mL 
+  - Moderate: 1000-2500 ng/mL 
+  - High: >=2500 ng/mL 
+- **Immune reconstitution**: 
+  - CD3 count >500
+  - CD4 count >200 
+  - CD8 count >200
+  - IgM >25. 
+- **VOD**: 
+  - **(1)** (Prescription of defibrotide after transplant date AND Abdominal ultrasound within 2 days) within 90 days of transplant. 
+  - ~~**(2)** (Abdominal ultrasound AND total bilirubin >2 mg/dL within 3 days) within 90 days of transplant~~ --- old definition, no longer used 
+  OR 
+  - **(3)** (Abdominal ultrasound AND total bilirubin >2 mg/dL within 2 days AND significant weight gain defined as: weight gain on 3 consecutive measurements within 10 days of ultrasound OR weight gain >5% of admission weight within 10 days of ultrasound) within 90 days of transplant
+  OR
+  - **(4)** Peritoneal drain placement procedure during transplant admission
+(this should show up as a procedure code during admission) --- new criterion 
+  OR 
+  - **(5)** Veno-occlusive disease (VOD) or sinusoidal obstruction syndrome (SOS) on patient problem list --- new criterion
+- **Neutrophil Engraftment**: The first of 3 successive days with an absolute neutrophil count (ANC) of 500/uL after post-transplantation nadi (Nadir usually occurs within 7-14 days after date of transplant) 
+- **Platelet engraftment**: The first of 3 consecutive days with a platelet count of 20,000/uL or higher in the absence of platelet transfusion for 7 consecutive days. 
+- **Primary graft failure**: 
+  - Must have not met criteria for neutrophil engraftment or platelet engraftment previously
+  - ANC <500/uL by day +28 after transplant AND hemoglobin < 8g/dL AND platelets < 20,000/uL 
+- **Secondary graft failure**: 
+  - Must have NOT met the requirement for primary graft failure 
+  - Requirement for red blood cell or platelet transfusions, or need for G-CSF medication (growth colony stimulating factor --- normally given by injections) AFTER meeting criteria for neutrophil or platelet engraftment previously 
+
+# Result Summary
+
+- <span style="background-color: #FFFF00"> This report only includes sickle cell disease (scd) and beta thalassemia. For the complete counts, pls refer to the study EDA report. </span>. 
+
+- The provisional cohort comprises `r format(cohort_ct, big.mark = ",")` patients from `r summarise(cohort, ct = n_distinct(site)) %>% pull(ct)` PEDSnet sites for all 3 Aims.
+    - Chart review data include `r cohort %>% filter(aim != "aim_3_1", aim != "aim_3_2") %>% distinct_ct()` patients from aim 2a and 2b of this cohort and an additional n = 16 patients whose transplant dates and number of transplants were not verifiable from EHR data. 
+    - The columns are not mutally exclusive as patients could be eligible for multiple aims.
+
+# Chart review summary:
+
+```{r cr_progress, echo= FALSE, message=FALSE, results='hide'}
+cohort_covars <- results_tbl("analytics_dataset") %>% collect() %>% 
+                      filter(scd_type == "scd" | scd_type == "bta")
+
+cr_data_raw <- read.csv("../redcap/IronOverloadChartRev_DATA_2024-08-08_1508.csv") %>% 
+            # filter out old patient ids
+           filter(!grepl("^[A-Za-z]", record_id)) %>% rename(site = redcap_data_access_group) %>% left_join(cohort %>% select(record_id, scd_type), by = "record_id") %>%
+           filter(!is.na(scd_type))
+total_cr_ct <- cr_data_raw %>% distinct_ct("record_id")
+
+# cleaned data
+cr_data <- get_redcap_data(redcap_filename = "../redcap/IronOverloadChartRev_DATA_2024-08-08_1508.csv") %>%
+            mutate(second_transplant = if_else(!is.na(second_transplant_date), TRUE, FALSE)) %>% left_join(cohort %>% select(record_id, scd_type), by = "record_id") %>%
+           filter(!is.na(scd_type))
+completed_cr_ct <- cr_data %>% distinct_ct("record_id")
+true_positives_cr_ct <- cr_data %>% filter(eligibility == "Yes") %>% distinct_ct("record_id")
+false_positives_cr_ct <- cr_data %>% filter(eligibility == "No") %>% distinct_ct("record_id")
+
+# among chart reviews patients, how many had leukemia
+leukemia_dx_px <- results_tbl(name = "leukemia_dx_px") %>% collect()
+cr_data_w_leukemia <- cr_data %>% distinct(record_id, eligibility) %>%
+                        left_join(results_tbl("study_cohorts")%>% select(person_id, record_id) %>% collect(), by = c("record_id")) %>%
+                        inner_join(leukemia_dx_px, by = "person_id") %>%
+                        distinct(record_id, eligibility, person_id) 
+
+false_positives_cr_w_leukemia_ct <- cr_data_w_leukemia %>% filter(eligibility == "No") %>% 
+                        distinct_ct("record_id")
+true_positives_cr_w_leukemia_ct <- cr_data_w_leukemia %>% filter(eligibility == "Yes") %>% 
+                        distinct_ct("record_id")
+true_positives_cr_w_leukemia_prior_ct <- cohort_covars %>% filter(eligibility == "Yes") %>%
+                        filter(leukemia_prior) %>%
+                        distinct_ct("record_id")
+# completed_cr_w_leukemia_ct <- r_data_w_leukemia %>% distinct_ct("record_id")
+cr_w_leukemia_ct <- cr_data_raw %>% distinct(record_id) %>% left_join(results_tbl("study_cohorts")%>% select(person_id, record_id) %>% collect(), by = c("record_id")) %>%
+                        inner_join(leukemia_dx_px, by = "person_id") %>%
+                        distinct_ct("record_id")
+```
+
+- Total number of chart reviews: `r total_cr_ct`
+    - Number of patients with leukemia in this cohort: `r cr_w_leukemia_ct`
+- Number of completed chart reviews: `r completed_cr_ct` (`r round(completed_cr_ct/total_cr_ct*100)`%)
+- Number of false positives: `r false_positives_cr_ct` (`r round(false_positives_cr_ct/total_cr_ct*100)`%)
+    - <span style="background-color: #FFFF00">Number of false positives with leukemia: `r false_positives_cr_w_leukemia_ct` (`r round(false_positives_cr_w_leukemia_ct/false_positives_cr_ct*100)`% of total false positives) </span>
+- Number of true positives: `r true_positives_cr_ct` (`r round(true_positives_cr_ct/total_cr_ct*100)`%)
+    - <span style="background-color: #FFFF00"> Number of true positives with leukemia: `r true_positives_cr_w_leukemia_ct` (`r round(true_positives_cr_w_leukemia_ct/true_positives_cr_ct*100)`% of total true positives). Among these patients, n = `r true_positives_cr_w_leukemia_prior_ct` had leukemia diagnosed before transplants.</span>
+
+- <span style="background-color: #FFFF00">For cases when no. true positives and total valid charts dont match, due to the pending LIC/Ferritin values awaiting confirmation from Nora. In the final analytic dataset, the 2 columns should match </span>. 
+```{r cr_progress_by_site}
+# count false positives, true positives, num complted and num total for each site
+cr_completion_by_site <- cr_data %>% group_by(site, eligibility) %>% 
+      summarise(n = n_distinct(record_id)) %>% ungroup() %>%
+      mutate(eligibility = if_else(eligibility == "No", "n_false_positives", "n_true_positives")) %>%
+      # total counts per site
+      union(cr_data_raw %>% group_by(site) %>% summarise(n = n_distinct(record_id)) %>% ungroup() %>% mutate(eligibility = "n_total")) %>%
+      # total completed charts per site
+      union(cr_data %>% filter(chart_completion) %>% group_by(site) %>% summarise(n = n_distinct(record_id)) %>% ungroup() %>% mutate(eligibility = "n_completed")) %>%
+      pivot_wider(id_cols = site, names_from = eligibility, values_from = n) %>% 
+      rename("no. false positives" = n_false_positives, 
+             "no. true positives" = n_true_positives, 
+             "total no.charts" =  n_total,
+             "no. chart completed" =  n_completed)
+
+# count number of patients for each aim per site
+aim_ct_by_site <- cohort_covars %>% select(person_id, site, starts_with("aim")) %>%
+                    pivot_longer(cols = aim_2a_2:aim_3_2, values_drop_na = TRUE, names_to = "aim", values_to = "val") %>% filter(val) %>%
+                    group_by(site) %>% mutate(site_total = n_distinct(person_id)) %>% ungroup() %>% 
+                    group_by(site, aim, site_total) %>% 
+                    summarize(no_persons = n_distinct(person_id)) %>% ungroup() %>% collect() %>%
+                    rename("no. valid per site" = site_total) %>%
+                    pivot_wider(names_from = aim, values_from = no_persons) 
+                    
+cr_completion_by_site %>% left_join(aim_ct_by_site, by = "site") %>%                    
+                  prettify_kable()
+```
+
+```{r cr_summary}
+cr_t1 <- cr_data %>% select(record_id, chart_completion, eligibility, donor_relation,
+                            match_status, graft_fail, second_transplant) %>% 
+                     mutate(donor_relation = if_else(eligibility == "No", "Not eligible", donor_relation)) %>%
+                     mutate(match_status = if_else(eligibility == "No", "Not eligible", match_status)) %>% distinct()
+label(cr_t1$chart_completion) = "Chart review completed"
+label(cr_t1$eligibility) = "Cohort Eligibility"
+label(cr_t1$donor_relation) = "Donor Relationship"
+label(cr_t1$match_status) = "Match Status"
+label(cr_t1$graft_fail) = "Graft failure*"
+label(cr_t1$second_transplant) = "Had a second transplant"
+
+table1(~eligibility + donor_relation + match_status + graft_fail +
+      second_transplant, 
+      data = cr_t1,
+      caption = "Chart Review Summary (Only Completed Charts)", 
+      footnote = "*Missing indicates false positive patients")
+```
+
+# Table 1: cohort characteristics
+```{r cohort_covars}
+cohort_covars <- cohort_covars %>% mutate(age_at_ce = as.numeric(difftime(transplant_date, birth_date, units = "days"))/365.25) %>% 
+                            mutate(age_group = case_when(age_at_ce < 5 ~ "[0, 5)",
+                                            age_at_ce < 10 ~ "[5, 10)",
+                                            age_at_ce < 15 ~ "[10, 15)",
+                                            age_at_ce < 20 ~ "[15, 20)",
+                                            age_at_ce < 40 ~ "[20, 40)",
+                                            TRUE ~ "40+"),
+                            age_group = factor(age_group, levels = c("[0, 5)","[5, 10)","[10, 15)",
+                                                                  "[15, 20)", "[20, 40)", "40+"))) %>%
+                            mutate(ethnicity = if_else(ethnicity == "No information", "Unknown", ethnicity),
+                            ethnicity = factor(ethnicity, levels = c("Hispanic or Latino", "Not Hispanic or Latino", "Other", "Unknown"))) %>%
+          mutate(survival = if_else(survival, "Alive", "Death"), 
+                survival_1yr = if_else(death_days_since_ce >= 365.25 | is.na(death_days_since_ce), "Alive", "Death"),
+                survival_3yr = if_else(death_days_since_ce >= (365.25*3) | is.na(death_days_since_ce), "Alive", "Death"),
+                survival_5yr = if_else(death_days_since_ce >= (365.25*5) | is.na(death_days_since_ce), "Alive", "Death"),
+                disease_relapse_days_since_ce = as.numeric(difftime(graft_fail_date, transplant_date, units = "days")),
+                bacteremia = if_else(is.na(bacteremia), "No", "Yes")) %>%
+          mutate(last_in_person_visit_since_ce = case_when(last_in_person_visit_since_ce <= 180 ~ "0-6 months",
+                                                  last_in_person_visit_since_ce <= 365.25 ~ "6-12 months",
+                                                  last_in_person_visit_since_ce <= 365.25*3 ~ "1-3 yrs",
+                                                  last_in_person_visit_since_ce <= 365.25*5 ~ "3-5 yrs",
+                                                  last_in_person_visit_since_ce > 365.25*5 ~ "more than 5-yrs",
+                                                  TRUE ~ NA),
+         age_at_ce = round(as.numeric(difftime(transplant_date, birth_date, unit = "days"))/365.25),
+         donor_relation = if_else(is.na(donor_relation), "Unknown", donor_relation),
+         match_status = if_else(is.na(match_status), "Unknown", match_status),
+         second_transplant = if_else(is.na(second_transplant_date), "No", "Yes"),
+         gender = if_else(gender == "FEMALE", "Female", "Male"),
+         scd_type = recode(scd_type, "aa" = "aplastic anemia", "dba" = "Diamond-Blackfan anemia", "bta" = "beta thalassemia major", "scd" = "sickle cell disease")) %>%
+        mutate(CD3_reconstitution = case_when(CD3_reconstitute_3mon ~ "0-3 months",
+                                        CD3_reconstitute_6mon ~ "3-6 months",
+                                        CD3_reconstitute_9mon ~ "6-9 months",
+                                        CD3_reconstitute_12mon ~ "9-12 months", TRUE ~ "Never/after 12 months"),
+         CD4_reconstitution = case_when(CD4_reconstitute_3mon ~ "0-3 months",
+                                        CD4_reconstitute_6mon ~ "3-6 months",
+                                        CD4_reconstitute_9mon ~ "6-9 months",
+                                        CD4_reconstitute_12mon ~ "9-12 months", TRUE ~ "Never/after 12 months"),
+         CD8_reconstitution = case_when(CD8_reconstitute_3mon ~ "0-3 months",
+                                        CD8_reconstitute_6mon ~ "3-6 months",
+                                        CD8_reconstitute_9mon ~ "6-9 months",
+                                        CD8_reconstitute_12mon ~ "9-12 months", TRUE ~ "Never/after 12 months"),
+         IgM_reconstitution = case_when(IgM_reconstitute_3mon~ "0-3 months",
+                                        IgM_reconstitute_6mon ~ "3-6 months",
+                                        IgM_reconstitute_3mon ~ "6-9 months",
+                                        IgM_reconstitute_12mon ~ "9-12 months", TRUE ~ "Never/after 12 months")) %>%
+         mutate(across(ends_with("reconstitution"), ~factor(.x, levels = c("0-3 months", "3-6 months", "6-9 months", "9-12 months", "Never/after 12 months")))) %>%
+         mutate(vod_subgroup = if_else(vod, scd_type, "No VOD")) %>% 
+         mutate(vod_subgroup = factor(vod_subgroup, levels = c("beta thalassemia major", "sickle cell disease", "No VOD")))%>%
+         mutate(busulfan_and_vod = case_when(has_busulfan & vod ~ "busulfan & VOD",
+                                            has_busulfan & !vod ~ "busulfan & No VOD", 
+                                            TRUE ~ "Other categories")) %>%
+         mutate(across(c("has_busulfan"), ~if_else(is.na(.x) | !(.x), "No", "Yes")))
+
+label(cohort_covars$disease_relapse) = "Disease relapse/Graft failure"
+label(cohort_covars$age_at_ce) = "Age at transplant"
+label(cohort_covars$transplant_type) = "Transplant type"
+label(cohort_covars$gender) = "Gender"
+label(cohort_covars$disease_relapse_days_since_ce) = "No days since CE until disease relapse*"
+label(cohort_covars$ferritin_days_pre) = "No days between CE and ferritin measurements"
+label(cohort_covars$survival) = "Overall survival"
+label(cohort_covars$survival_1yr) = "Overall survival at 1 yr after CE" 
+label(cohort_covars$survival_3yr) = "Overall survival at 3 yrs after CE"  
+label(cohort_covars$survival_5yr) = "Overall survival at 5 yrs after CE"  
+label(cohort_covars$death_days_since_ce) = "No days since CE until death*"
+# label(aim_2a_2$death_days_since_last_transplant) = "No days since disease relapse until death*"
+label(cohort_covars$GVHD) = "Graft-versus-host disease (GvHD)"
+label(cohort_covars$vod_subgroup) = "Incidence of veno-occlusive disease (VOD)"
+label(cohort_covars$bacteremia) = "Bacteremia"
+label(cohort_covars$ferritin_pre) = "Pre-transplant Ferritin Level"
+label(cohort_covars$second_transplant) = "Had a second transplant"
+label(cohort_covars$donor_relation) = "Donor relationship to the patient"
+label(cohort_covars$match_status) = "Match status"
+label(cohort_covars$scd_type) = "Disease Type"
+label(cohort_covars$last_visit_since_ce) = "Follow-up duration (yrs)"
+label(cohort_covars$LIC_level) = "Pre-transplant Ferritin Level"
+label(cohort_covars$LIC_days_since_transplant) = "No days between CE and LIC measurements"
+label(cohort_covars$CD3_reconstitution) = "CD3 reconstition post-transplant"
+label(cohort_covars$CD4_reconstitution) = "CD4 reconstition post-transplant"
+label(cohort_covars$CD8_reconstitution) = "CD8 reconstition post-transplant"
+label(cohort_covars$IgM_reconstitution) = "IgM reconstition post-transplant"
+label(cohort_covars$conditioning_type) = "Type of confitioning agents"
+label(cohort_covars$busulfan_and_vod) = "Bulsufan & VOD"
+label(cohort_covars$has_busulfan) = "Received Bulsufan"
+
+```
+
+```{r table1, echo=FALSE}
+cohort_t1 <- cohort_covars %>% filter(aim_2a_2 | aim_2a_1) %>% mutate(aim = "aim_2a") %>%
+                union(cohort_covars %>% filter(aim_2b_1 | aim_2b_2) %>% mutate(aim = "aim_2b")) %>%
+                union(cohort_covars %>% filter(aim_3_1 | aim_3_2) %>% mutate(aim = "aim_3") )%>%
+                union(cohort_covars %>% distinct(person_id, .keep_all = TRUE) %>% mutate(aim = "Total"))
+label(cohort_t1$age_group) = "Age at first transplant"
+label(cohort_t1$gender) = "Gender"
+label(cohort_t1$transplant_type) = "Type of transplant"
+label(cohort_t1$scd_type) = "Type of scd"
+
+table1(~gender + age_group + ethnicity + transplant_type + scd_type| aim, 
+      data = cohort_t1,
+      overall = FALSE, 
+      caption = "Table 1: cohort characteristics")
+
+```
+
+# Aim_2a_1: Pre-transplant LIC status
+- <span style="background-color: #FFFF00">This table only has patients with complete chart reviews AND verifiable LIC unit conversions </span>
+- We can also look at the max LIC, the average of the 3 max values, or the average of the 3 most recent values. However, since many patients only had 1 or 2 LIC values before transplant. This makes little difference
+```{r aim_2a_1}
+aim_2a_1 <- cohort_covars %>% filter(aim_2a_1, !is.na(LIC_level), 
+                                    LIC_type == "pre-transplant", chart_completion) %>% collect()
+
+table1(~disease_relapse + disease_relapse_days_since_ce + 
+       survival + death_days_since_ce + 
+       LIC_days_since_transplant + 
+       survival_1yr + survival_3yr + survival_5yr + 
+      # death_days_since_last_transplant +
+      GVHD + vod_subgroup + bacteremia + 
+      conditioning_type + 
+      has_busulfan + 
+      busulfan_and_vod| LIC_level, 
+      data = aim_2a_1,
+      caption = "Pre-transplant LIC status (Only patients with completed chart reviews AND verifiable LIC unit conversions)",
+      footnote = c("* Missing indicates patients without disease relapse/death"))
+```
+
+# Aim_2a_1: Pre-transplant LIC status with binary classification
+- <span style="background-color: #FFFF00">This table only has patients with complete chart reviews AND verifiable LIC unit conversions </span>
+- We can also look at the max LIC, the average of the 3 max values, or the average of the 3 most recent values. However, since many patients only had 1 or 2 LIC values before transplant. This makes little difference
+```{r aim_2a_1_binary}
+aim_2a_1_binary <- cohort_covars %>% filter(aim_2a_1, !is.na(LIC_level_3_binary), 
+                                    LIC_type == "pre-transplant", chart_completion) %>% collect()
+
+table1(~disease_relapse + disease_relapse_days_since_ce + 
+       survival + death_days_since_ce + 
+       LIC_days_since_transplant + 
+       survival_1yr + survival_3yr + survival_5yr + 
+      # death_days_since_last_transplant +
+      GVHD + vod_subgroup + bacteremia +
+      conditioning_type + 
+      has_busulfan + 
+      busulfan_and_vod| LIC_level_3_binary, 
+      data = aim_2a_1,
+      caption = "Pre-transplant LIC status (Only patients with completed chart reviews AND verifiable LIC unit conversions)",
+      footnote = c("* Missing indicates patients without disease relapse/death"))
+```
+
+# Aim_2a_2: Pre-transplant ferritin status
+- <span style="background-color: #FFFF00">This table only has patients with complete chart reviews </span>
+- <span style="background-color: #FFFF00">To-do: </span>
+  - The fraction of GVHD looks low compared to Armand 2007 
+  - Patients with very short follow up, did they die? 
+
+```{r aim_2a_2}
+aim_2a_2 <- cohort_covars %>% filter(aim_2a_2, chart_completion) %>% collect() %>% view()
+
+table1(~age_at_ce + gender + disease_relapse + 
+       disease_relapse_days_since_ce + 
+       ferritin_days_pre + 
+       survival + survival_1yr + survival_3yr + survival_5yr + 
+       death_days_since_ce + #death_days_since_last_transplant +
+       transplant_type + 
+       donor_relation + match_status + 
+       second_transplant + scd_type + 
+       round(last_visit_since_ce/365.25, 1) + 
+       GVHD + vod_subgroup + bacteremia +
+       conditioning_type + 
+       has_busulfan + busulfan_and_vod| ferritin_pre, 
+       data = aim_2a_2, 
+       caption = "Pre-transplant ferritin status",
+       footnote = c("* Missing indicates patients without disease relapse/death"), 
+       render.continuous=my.render.cont)
+```
+```{r cohort_covars_survival_analysis, echo= FALSE, message=FALSE, results='hide'}
+stat_dataset <- results_tbl("survival_analysis_dataset") %>% collect() 
+                              
+aim_2a_2 <- stat_dataset %>% filter(aim_2a_2, chart_completion, eligibility == "Yes") %>%
+                  mutate(ferritin_pre = factor(ferritin_pre, levels = c("low", "moderate", "high")),
+                        ferritin_pre_max = factor(ferritin_pre_max, levels = c("low", "moderate", "high"))) 
+```
+
+# Aim 2a-2: Overall survival stratified by <span style="color:red">pre-transplant ferritin levels</span>
+- Multivariate Cox proportional hazard model adjusted for: 
+  - pre-transplant most recent ferritin levels: low, moderate, or high
+  - age at transplant: continuous 
+  - gender: female or male
+  - disease relapse: yes or no 
+  - disease type: scd or btm
+- Variables that are not yet adjusted for due to convergence problem. We could consider some alternative approaches later on 
+  - match status: cord blood, haploidentical, or other
+  - graft manipulation: yes, no, or unknown
+- 95% CI omitted for clarity
+
+```{r overall_surv_pre_ferritin, echo= FALSE, message=FALSE, fig.width = 9, fig.height = 6}
+pre_ferritin_cox <- aim_2a_2 %>% filter(!is.na(survival_time_5yr_censored)) %>%
+                          filter(scd_type %in% c("sickle cell disease", "beta thalassemia major")) %>%
+                          select(record_id, ferritin_pre, age_at_ce, gender, match_status, graft_manip, transplant_type, scd_type, disease_relapse, graft_fail_date, donor_relation, survival_time_5yr_censored, survival_5yr, second_transplant)
+
+# 0 is censored/survived, 1 is death
+# exclude match_status and graft_manip
+res.cox <- coxph(Surv(survival_time_5yr_censored/365.25, survival_5yr) ~ ferritin_pre + age_at_ce + gender + disease_relapse + scd_type, 
+                data = pre_ferritin_cox)
+
+# visualiza the impact on iron levels
+ferritin_levels_df <- with(pre_ferritin_cox,
+               data.frame(ferritin_pre = c("low", "high", "moderate"), 
+                          age_at_ce = rep(mean(age_at_ce, na.rm = TRUE), 3),
+                          gender = rep("Female", 3),
+                          # transplant_type = c("Allogeneic", "Allogeneic", "Allogeneic"),
+                          # match_status = rep("Cord Blood", 3), 
+                          disease_relapse = rep("No", 3), 
+                          # graft_manip = rep("No", 3), 
+                          scd_type = rep("beta thalassemia major", 3)
+                          )
+               )
+fit <- survfit(res.cox, newdata = ferritin_levels_df)
+ggsurvplot(fit, data = ferritin_levels_df, 
+                  conf.int = FALSE, ggtheme = theme_minimal(),
+                  legend.labs = c("Low", "High", "Moderate"),
+                  legend.title = "Pre-transplant ferritin levels", 
+                  xlab = "Years", ylab = "Overall survival probability",
+                  xlim = c(0, 5), ylim = c(0.5, 1.0)) 
+                  #risk.table = TRUE, risk.table.title = "test")
+
+# output overall survival curves
+# survfit2(res.cox) %>% ggsurvfit() +
+#   labs(
+#     x = "Years",
+#     y = "Overall survival probability",
+#     title = "Overall survival analysis pre-transplant ferritin"
+#     ) + 
+#   add_confidence_interval() +
+#   add_risktable()
+```
+
+- The p-value for disease relapse is 0.003 with a hazard ration HR = 6.4 (95%CI 1.8 - 22.1), indicating a strong relationship between patient's with disease relapse and decreased survival probability. In other words, holding all other factors constant, having disease relapse increased the death hazard by more than 500%. 
+- Despite not being statistically significant: 
+  - Having high pre-transplant ferritin levels reduces the survival probability by ~90% while having a moderate pre-transplant ferritin levels increases the survival probability by 24%. 
+  - Being male is also associated with better prognostic. 
+  - Having scd is associated with better outcomes compared to btm. 
+- Since OS depends on disease subgroups, the OS analysis stratifed by disease would give us more understanding of the problems. 
+
+```{r overall_surv_pre_ferritin_sum, echo= FALSE, message=FALSE}
+# summary(res.cox)
+surv_summary(res.cox) %>% prettify_kable()
+```
+
+## Aim 2a-2: Overall survival stratified by <span style="color:red">pre-transplant ferritin levels</span> for SCD
+- Multivariate Cox proportional hazard model adjusted for: 
+  - pre-transplant most recent ferritin levels: low, moderate, or high
+  - age at transplant: continuous 
+  - gender: female or male
+  - disease relapse: yes or no 
+  - disease type: scd or btm
+- Variables that are not yet adjusted for due to convergence problem. We could consider some alternative approaches later on 
+  - match status: cord blood, haploidentical, or other
+  - graft manipulation: yes, no, or unknown
+- 95% CI omitted for clarity
+- Consistent with what observed for the overall cohort: 
+  - ~~Having disease relapse is significantly associated with worse outcome.~~ 
+  - The p-value for high ferritin level is borderline so we will try grouping low-ferritin and moderate-ferritin to low-moderate ferritin group. 
+
+```{r overall_surv_pre_ferritin_subgroups, echo= FALSE, message=FALSE}
+res.cox_scd <- coxph(Surv(survival_time_5yr_censored/365.25, survival_5yr) ~ ferritin_pre + age_at_ce + gender,# + disease_relapse,
+                data = pre_ferritin_cox %>% filter(scd_type %in% c("sickle cell disease")))#%>% mutate(match_status = factor(match_status, levels = c("Haploidentical", "8-10/10", "Unknown"))))
+# summary(res.cox_scd)
+surv_summary(res.cox_scd) %>% prettify_kable()
+ferritin_levels_scd <- with(pre_ferritin_cox %>% filter(scd_type %in% c("sickle cell disease")),
+               data.frame(ferritin_pre = c("low", "moderate", "high"), 
+                          age_at_ce = rep(mean(age_at_ce, na.rm = TRUE), 3),
+                          gender = rep("Female", 3),
+                          #transplant_type = c("Allogeneic", "Allogeneic", "Allogeneic"),
+                          match_status = rep("Haploidentical", 3), 
+                          disease_relapse = rep("No", 3), 
+                          graft_manip = rep("No", 3), 
+                          scd_type = rep("beta thalassemia major", 3)
+                          )
+               )
+
+fit_scd <- survfit(res.cox_scd, newdata = ferritin_levels_scd)
+ggsurvplot(fit_scd, data = ferritin_levels_scd, 
+                  conf.int = FALSE, ggtheme = theme_minimal(),
+                  legend.labs = c("Low", "Moderate", "High"),
+                  legend.title = "Pre-transplant ferritin levels", 
+                  xlab = "Years", ylab = "Overall survival probability", title = "SCD")
+                  #risk.table = TRUE)
+```
+
+## Aim 2a-2: Overall survival stratified by <span style="color:red">pre-transplant ferritin levels BINARY classification </span> for SCD
+- Multivariate Cox proportional hazard model adjusted for: 
+  - pre-transplant most recent ferritin levels: low, moderate, or high
+  - age at transplant: continuous 
+  - gender: female or male
+  - disease relapse: yes or no 
+  - disease type: scd or btm
+- Variables that are not yet adjusted for due to convergence problem. We could consider some alternative approaches later on 
+  - match status: cord blood, haploidentical, or other
+  - graft manipulation: yes, no, or unknown
+- Grouping low and moderate pre-transplant ferritin levels:
+  - Having a high pre-transplant ferritin level is associated with higher risk of death (HR = 5.71 (95%CI 0.94 - 34.84), p-value = 0.0588). The effect is borderline significant. 
+  - Similar to the results above: 
+```{r overall_surv_pre_ferritin_scd_binary, echo= FALSE, message=FALSE}
+pre_ferritin_cox_scd_binary <- pre_ferritin_cox %>% filter(scd_type %in% c("sickle cell disease")) %>% mutate(ferritin_pre = factor(recode(ferritin_pre, "low" = "low-moderate", "moderate" = "low-moderate"), levels = c("low-moderate", "high")))
+
+res.cox_scd_binary <- coxph(Surv(survival_time_5yr_censored/365.25, survival_5yr) ~ ferritin_pre + age_at_ce + gender,
+                data = pre_ferritin_cox_scd_binary)
+# summary(res.cox_scd_binary)
+surv_summary(res.cox_scd_binary) %>% prettify_kable()
+ferritin_levels_scd_binary <- with(pre_ferritin_cox_scd_binary,
+               data.frame(ferritin_pre = c("low-moderate", "high"), 
+                          age_at_ce = rep(mean(age_at_ce, na.rm = TRUE), 2),
+                          gender = rep("Female", 2),
+                          #transplant_type = c("Allogeneic", "Allogeneic", "Allogeneic"),
+                          match_status = rep("Haploidentical", 2), 
+                          disease_relapse = rep("No", 2), 
+                          graft_manip = rep("No", 2), 
+                          scd_type = rep("beta thalassemia major", 2)
+                          )
+               )
+
+fit_scd_binary <- survfit(res.cox_scd_binary, newdata = ferritin_levels_scd_binary)
+ggsurvplot(fit_scd_binary, data = ferritin_levels_scd_binary, 
+                  conf.int = TRUE, ggtheme = theme_minimal(),
+                  legend.labs = c("Low-Moderate", "High"),
+                  legend.title = "Pre-transplant ferritin levels BINARY classification", 
+                  xlab = "Years", ylab = "Overall survival probability", title = "SCD")
+                  #risk.table = TRUE)
+```
+
+## Aim 2a-2: Overall survival stratified by <span style="color:red">pre-transplant ferritin levels</span> for BTM
+- Multivariate Cox proportional hazard model adjusted for: 
+  - pre-transplant most recent ferritin levels: low, moderate, or high
+  - age at transplant: continuous 
+  - gender: female or male
+  - disease relapse: yes or no 
+  - disease type: scd or btm
+- Variables that are not yet adjusted for due to convergence problem. We could consider some alternative approaches later on 
+  - match status: cord blood, haploidentical, or other
+  - graft manipulation: yes, no, or unknown
+- 95% CI omitted for clarity
+
+```{r overall_surv_pre_ferritin_btm_sum, echo= FALSE, message=FALSE}
+res.cox_btm <- coxph(Surv(survival_time_5yr_censored/365.25, survival_5yr) ~ ferritin_pre + age_at_ce + gender,
+                data = pre_ferritin_cox %>% filter(scd_type != "sickle cell disease"))
+
+# summary(res.cox_btm)
+surv_summary(res.cox_btm) %>% prettify_kable()
+ferritin_levels_btm <- with(pre_ferritin_cox %>% filter(scd_type != "sickle cell disease"),
+               data.frame(ferritin_pre = c("low", "moderate", "high"), 
+                          age_at_ce = rep(mean(age_at_ce, na.rm = TRUE), 3),
+                          gender = rep("Female", 3),
+                          # transplant_type = c("Allogeneic", "Allogeneic", "Allogeneic"),
+                          match_status = rep("Cord Blood", 3), 
+                          disease_relapse = rep("No", 3), 
+                          graft_manip = rep("No", 3), 
+                          scd_type = rep("beta thalassemia major", 3)
+                          )
+               )
+
+fit_btm <- survfit(res.cox_btm, newdata = ferritin_levels_btm)
+ggsurvplot(fit_scd, data = ferritin_levels_btm, 
+                  conf.int = FALSE, ggtheme = theme_minimal(),
+                  legend.labs = c("Low", "Moderate", "High"),
+                  legend.title = "Pre-transplant ferritin levels", 
+                  xlab = "Years", ylab = "Overall survival probability", title = "BTM",
+                  risk.table = FALSE)
+```
+
+# Bacteremia for the overall cohort 
+- Multivariate Cox proportional hazard model adjusted for: 
+  - pre-transplant most recent ferritin levels: low, moderate, or high
+  - age at transplant: continuous 
+  - gender: female or male
+  - transplant_type: Autologous/Gene therapy or Allogeneic
+- The next version should treat death and graft failure as competeting risks 
+- Having high pre-transplant ferritin level is associated with significant higher risk of bacteremia. 
+- While not being statistically significant:
+  - Autologous/Gene therapy transplant is associated with 54% reduction in bacteremia risk. 
+  - Need to double check for the match_status and transplant type. There seems to be some problem with the match_status variable that gives counterintuitive results. 
+```{r bacteremia, echo= FALSE, message=FALSE}
+bacteremia <- stat_dataset %>% filter(aim_2a_2, chart_completion, eligibility == "Yes") %>%
+                  mutate(ferritin_pre = factor(ferritin_pre, levels = c("low", "moderate", "high")),
+                        ferritin_pre_max = factor(ferritin_pre_max, levels = c("low", "moderate", "high")))
+
+res.cox_bacteremia <- coxph(Surv(bacteremia_time_5yr_censored/365.25, bacteremia_5yr) ~ ferritin_pre + age_at_ce + gender + transplant_type,# + scd_type,
+                data = bacteremia %>% filter(!is.na(ferritin_pre)))
+
+# summary(res.cox_bacteremia)
+surv_summary(res.cox_bacteremia) %>% prettify_kable()
+ferritin_levels_bacteremia <- with(bacteremia,
+               data.frame(ferritin_pre = c("low", "moderate", "high"), 
+                          age_at_ce = rep(mean(age_at_ce, na.rm = TRUE), 3),
+                          gender = rep("Female", 3),
+                          transplant_type = rep("Allogeneic", 3),
+                          match_status = rep("Cord Blood", 3), 
+                          disease_relapse = rep("No", 3), 
+                          graft_manip = rep("No", 3), 
+                          scd_type = rep("beta thalassemia major", 3),
+                          transplant_type = rep("Autologous/Gene therapy", 3)
+                          )
+               )
+
+fit_bacteremia <- survfit(res.cox_bacteremia, newdata = ferritin_levels_bacteremia)
+ggsurvplot(fit_bacteremia, data = ferritin_levels_btm, 
+                  conf.int = TRUE, ggtheme = theme_minimal(),
+                  legend.labs = c("Low", "Moderate", "High"),
+                  legend.title = "Pre-transplant ferritin levels", 
+                  xlab = "Years", ylab = "Bacteremia probability", title = "Overall Cohort",
+                  risk.table = FALSE)
+                
+```
+
+# Bacteremia for the overall cohort: Binary pre-transplant ferritin classification
+```{r bacteremia_binary, echo= FALSE, message=FALSE}
+bacteremia_binary <- stat_dataset %>% filter(aim_2a_2, chart_completion, eligibility == "Yes") %>%
+                    mutate(ferritin_pre = factor(recode(ferritin_pre, "low" = "low-moderate", "moderate" = "low-moderate"), levels = c("low-moderate", "high")))
+
+res.cox_bacteremia_binary <- coxph(Surv(bacteremia_time_5yr_censored/365.25, bacteremia_5yr) ~ ferritin_pre + age_at_ce + gender + transplant_type + match_status,# + scd_type,
+                data = bacteremia_binary %>% filter(!is.na(ferritin_pre)))
+
+# summary(res.cox_bacteremia_binary)
+surv_summary(res.cox_bacteremia_binary) %>% prettify_kable()
+ferritin_levels_bacteremia_binary <- with(bacteremia_binary,
+               data.frame(ferritin_pre = c("low-moderate", "high"), 
+                          age_at_ce = rep(mean(age_at_ce, na.rm = TRUE), 2),
+                          gender = rep("Female", 2),
+                          transplant_type = rep("Allogeneic", 2),
+                          match_status = rep("Cord Blood", 2), 
+                          disease_relapse = rep("No", 2), 
+                          graft_manip = rep("No", 2), 
+                          scd_type = rep("beta thalassemia major", 2),
+                          transplant_type = rep("Autologous/Gene therapy", 2)
+                          )
+               )
+
+fit_bacteremia_binary <- survfit(res.cox_bacteremia_binary, newdata = ferritin_levels_bacteremia_binary)
+ggsurvplot(fit_bacteremia_binary, data = ferritin_levels_bacteremia_binary, 
+                  conf.int = TRUE, ggtheme = theme_minimal(),
+                  legend.labs = c("Low-moderate", "High"),
+                  legend.title = "Pre-transplant ferritin levels", 
+                  xlab = "Years", ylab = "Bacteremia probability", title = "Overall Cohort Binary Classification",
+                  risk.table = FALSE)
+                
+```

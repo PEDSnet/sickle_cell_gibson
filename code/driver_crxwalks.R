@@ -85,7 +85,4 @@
      rslt$study_cohorts %>% distinct_ct()  
      rslt$study_cohorts %>% collect() %>% output_tbl(name = "study_cohorts") 
 
-     # test 
-     results_tbl("study_cohorts")
 }
-

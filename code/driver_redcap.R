@@ -1,58 +1,77 @@
 .run  <- function() {
 
+    library(tidyr)
+    library(ggplot2)
+    
     setup_pkgs()
 
-    cr_data <- read.csv("redcap/IronOverloadChartRev_DATA_2024-05-02_1145.csv")
-    # filter out old patient ids
-    cr_data <- cr_data %>% filter(!grepl("^[A-Za-z]", record_id))
-    # extract completed records 
-    cr_data <- cr_data %>% rename(site = redcap_data_access_group, 
-                        chart_completion = iron_overload_chart_review_complete,
-                        transplant_date = date_tpx,
-                        transplant_type = tpx_type) %>%
-                mutate(transplant_type = case_when(transplant_type == 1 ~ "Allogeneic", 
-                                            transplant_type == 2 ~ "Autologous/Gene therapy", 
-                                            TRUE ~ NA),
-                        chart_completion = if_else(chart_completion == 2, TRUE, FALSE), 
-                        across(iron_date_1:est_method_15, ~if_else(.x == "", NA, .x)),
-                        across(c("transplant_date", "second_transplant_date"), ~if_else(.x == "", NA, .x)),
-                        across(iron_val_1:iron_val_15, ~as.numeric(.x)),
-                        # transplant_date = if_else(transplant_date == "", NA, as.Date(transplant_date)),
-                        eligibility = case_when(is.na(transplant_date ) & is.na(eligibility) ~ 0,
-                                                !is.na(transplant_date ) & is.na(eligibility) ~ 1,  
-                                                TRUE ~ eligibility)) %>%
-                filter(chart_completion) 
+    # Stanford always have some weird data
+    # 08_0017 has an LIC date but no LIC_raw value
+    # 08_0019_cr measurement on 2019-06-06 R2* require no conversion
+    test <- read.csv("redcap/IronOverloadChartRev_DATA_2024-08-08_1508.csv")
+    test %>% filter(redcap_data_access_group == "cchmc") %>% select(record_id, starts_with("iron_val_")) %>% view()
 
-    # any eligible cases without any LIC measurements would be filtered out
-    cr_data_eligible <- cr_data %>% pivot_longer(cols = c(starts_with("iron_date_")), names_to = "no_LIC_measurement", 
-                            values_to = "LIC_date", values_drop_na = TRUE) %>% 
-                mutate(no_LIC_measurement = as.numeric(sub(".*_([0-9]+)$", "\\1", no_LIC_measurement)),
-                    LIC_date = as.Date(LIC_date)) %>% 
-                pivot_longer(cols = starts_with("iron_val_"), names_to = "no_LIC_measurement1", 
-                            values_to = "LIC", values_drop_na = TRUE) %>%
-                mutate(no_LIC_measurement1 = as.numeric(sub(".*_([0-9]+)$", "\\1", no_LIC_measurement1))) %>% 
-                filter(no_LIC_measurement == no_LIC_measurement1) %>%
-                pivot_longer(cols = starts_with("est_method_"), names_to = "no_LIC_measurement2", 
-                            values_to = "LIC_est_method", values_drop_na = TRUE) %>%
-                mutate(no_LIC_measurement2 = as.numeric(sub(".*_([0-9]+)$", "\\1", no_LIC_measurement2))) %>% 
-                filter(no_LIC_measurement == no_LIC_measurement2) %>% 
-                    # ((!is.na(LIC_date) | !is.na(LIC) | !is.na(LIC_est_method))& eligibility != 0) | eligibility == 0) %>%
-                select(-no_LIC_measurement1, -no_LIC_measurement2)
-
-    cr_data_ineligible <- cr_data %>% select(-c(iron_date_1:est_method_15)) %>% 
-                            anti_join(cr_data_eligible %>% distinct(record_id), by = "record_id") %>%
-                            # filter(eligibility == 0) %>%
-                            mutate(LIC = NA, LIC_date = NA, LIC_est_method = NA, no_LIC_measurement = NA)
-    cr_data <- bind_rows(cr_data_eligible, cr_data_ineligible) %>% arrange(record_id, no_LIC_measurement)
+    # get the most recent redcap data, filter out old patient ids, extract completed records
+    cr_data <- get_redcap_data(redcap_filename = "redcap/IronOverloadChartRev_DATA_2024-08-08_1508.csv")
     cr_data %>% view()
-
-    # number of completed chart reviews n = 271 
+    
+    # number of completed chart reviews n = 600 
     num_cr_completed <- cr_data %>% distinct_ct("record_id")
-
-    # number of false positives n = 40
-    num_false_positives <- cr_data %>% filter(is.na(transplant_date)) %>% distinct_ct("record_id") # 40
-    num_tru_positives <- cr_data %>% filter(!is.na(transplant_date)) %>% distinct_ct("record_id") # 231
+    num_false_positives <- cr_data %>% filter(eligibility == "No") %>% distinct_ct("record_id") # 102
+    num_tru_positives <- cr_data %>% filter(eligibility == "Yes") %>% distinct_ct("record_id") # 498
                             
+    # is there any record without graft manipulation status, the best fix is to manually fix their redcap form 
+    cr_data %>% filter(is.na(graft_manip), eligibility == "Yes") %>% view()
+
+    # check for consistency between graft failure and graft failure dates:
+    # all graft failures should have a date
+    cr_data %>% filter(graft_fail == "Yes", is.na(graft_fail_date)) %>% distinct(record_id, graft_fail, graft_fail_date) %>% view()
+
+    # is there any record without graft failure status, the best fix is to manually fix their redcap form
+    cr_data %>% filter(is.na(graft_fail), eligibility == "Yes") %>% distinct(record_id, graft_fail, graft_fail_date, eligibility) %>% view()
+
+    # filter out false postives and patients without LIC values
+    # LIC unit conversion: Note all LIC values are expected in mg Fe / g dry weight
+    # R2* from chop and colorado: no conversion needed, other institutions: ask Nora
+    cr_data %>% filter(eligibility == "Yes", !is.na(LIC_date)) %>% 
+                group_by(site, LIC_other_unit, LIC_est_method) %>% 
+                summarise(n = n_distinct(record_id)) %>%  
+                ungroup() %>% filter(LIC_est_method == "R2*") %>% #is.na(LIC_other_unit) | is.na(LIC_est_method)
+                view()
+    # T2* from stanford: 
+    # T2* from colorado: no conversion needed
+    # other institutions: ask Nora
+    cr_data %>% filter(eligibility == "Yes", !is.na(LIC_date)) %>% 
+                group_by(site, LIC_other_unit, LIC_est_method) %>% 
+                summarise(n = n_distinct(record_id)) %>%  
+                ungroup() %>% filter(LIC_est_method == "T2*") %>% #is.na(LIC_other_unit) | is.na(LIC_est_method)
+                view()
+
+    # to check for a specific value
+    cr_data %>% filter(eligibility == "Yes", !is.na(LIC_date), LIC_est_method == "T2*", site == "stanford", is.na(LIC_other_unit)) %>% view()
+    
+    cr_data <- cr_data %>% mutate(is_ms = case_when(grepl("milliseconds", LIC_other_unit, ignore.case = TRUE) ~ TRUE, 
+                                        grepl("ms", LIC_other_unit, ignore.case = TRUE) ~ TRUE, 
+                                        is.na(LIC_other_unit) ~ NA,
+                                        TRUE ~ FALSE),
+                        LIC = case_when(record_id == "08_0019_cr" & LIC_est_method == "R2*" ~ LIC_raw,
+                                        site %in% c("chop", "colorado") ~ LIC_raw, # no conversion needed for these sites 
+                                        !is_ms | is.na(is_ms) ~ LIC_raw, 
+                                        is_ms ~ 1000/LIC_raw*0.0254 + 0.202, 
+                                        TRUE ~ NA_real_),
+                        LIC_type = case_when(LIC_date >= transplant_date ~ "post-transplant", 
+                                             LIC_date < transplant_date ~ "pre-transplant", 
+                                             TRUE ~ NA)) 
+    # double check
+    cr_data %>% filter(eligibility == "Yes", !is.na(LIC_date)) %>% 
+                select(site, record_id, LIC_date, LIC_est_method, LIC_other_unit, is_ms, LIC_raw, LIC) %>% 
+                arrange(site, record_id, LIC_date, LIC_est_method, is_ms) %>% 
+                view()
+                # group_by(LIC_other_unit, LIC_est_method, is_ms) %>% summarise(n = n_distinct(record_id)) %>% view()
+
+    # write cr data to a table
+    cr_data %>% output_tbl(name = "cr_data")
+
     # completion by site
     cr_data %>% filter(iron_overload_chart_review_complete == 2) %>% 
         mutate(eligibility = case_when(eligibility == 1 ~ "Eligible", 
@@ -61,20 +80,16 @@
         group_by(site, eligibility) %>% 
         summarise(num_completed = n()) %>% 
         ungroup() %>%
-        pivot_wider(names_from = eligibility, values_from = num_completed)
-
-    # chop data
-    cr_chop <- cr_data %>% 
-                filter(site == "chop") %>% distinct(record_id) %>% view()        
+        pivot_wider(names_from = eligibility, values_from = num_completed)  
 
     # let's check who did not have a transplant
     # aka false positives
     cr_data %>% filter(is.na(transplant_date)) %>% 
         select(record_id) %>%
         inner_join(results_tbl("master_xwalk_ids_ALL_AIMS") %>% collect(), by = c("record_id")) %>% 
-        inner_join(results_tbl("study_cohorts") %>% collect(), by = c("person_id")) %>% 
+        inner_join(results_tbl("study_cohorts") %>% collect(), by = c("person_id", "record_id", "site")) %>% 
         select(record_id, person_id, transplant_date, transplant_type, aim_2a_2:aim_3_2) %>%
-        output_tbl(name = "false_positive_ids", local = TRUE, file = TRUE)
+        output_tbl(name = "false_positive_ids")
     
     # let's see how well the transplant date and status match
     cr_concord <- cr_data %>% filter(!is.na(transplant_date)) %>% 
@@ -122,7 +137,7 @@
                             select(person_id, aim_2a_1:aim_3_2) ) %>%
                     collect()
 
-results_tbl("study_cohorts") %>% collect() %>% # no multiple transplants
+    results_tbl("study_cohorts") %>% collect() %>% # no multiple transplants
                 filter(!(aim_3_1| aim_3_2)) %>% 
                 distinct(person_id, site) %>%
                 union(results_tbl("multi_transplant_cohort") %>% collect() %>% #patients with unverifiable transplant status

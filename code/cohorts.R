@@ -16,9 +16,21 @@ find_scd_conditions <- function(){
   return(tbl)
 }
 
+find_conditions <- function(dx_codeset){
+  tbl <- cdm_tbl("condition_occurrence") %>% inner_join(dx_codeset, by = c("condition_concept_id" = "concept_id")) %>%
+                select(condition_occurrence_id, 
+                        person_id, 
+                        condition_concept_id, 
+                        condition_concept_name, 
+                        condition_start_date,  
+                        condition_start_age_in_months, site) 
+              
+  return(tbl)
+}
+
 # could be used for mri, phleb
 find_procedures <- function(procedure_codeset_name){
-    procedure_id <- load_codeset(procedure_codeset_name) %>% compute_new()
+    procedure_id <- load_codeset(procedure_codeset_name)
     tbl <- cdm_tbl("procedure_occurrence") %>% inner_join(procedure_id, by = c("procedure_concept_id" = "concept_id")) %>%
                 select(procedure_occurrence_id, 
                         person_id, 
@@ -139,13 +151,14 @@ find_drugs <- function(dx_codeset){
     return(tbl)
 }
 
-find_measurements <- function(mx_codeset, cohort = NULL){
+find_measurements <- function(mx_codeset, cohort = NULL){    
+
     tbl <- cdm_tbl("measurement") %>% inner_join(mx_codeset, by = c("measurement_concept_id" = "concept_id")) %>%
                 select(measurement_id, 
                         person_id, 
-                        ferritin_concept_id = measurement_concept_id, 
-                        ferritin_concept_name = measurement_concept_name, 
-                        ferritin_date = measurement_date, 
+                        measurement_concept_id, 
+                        measurement_concept_name, 
+                        measurement_date, 
                         operator_concept_name, 
                         value_as_number, 
                         unit_concept_name,
@@ -154,6 +167,36 @@ find_measurements <- function(mx_codeset, cohort = NULL){
                         range_low, 
                         range_low_operator_concept_name,
                         unit_concept_name)
+
+    if(!is.null(cohort)){
+        tbl <- tbl %>% inner_join(cohort, by = "person_id")
+    }
+    return(tbl)
+}
+
+find_organism <- function(cohort,
+                          lab_tbl=cdm_tbl("measurement_organism")) {
+  tbl <- cohort %>% select(person_id) %>%
+    inner_join(lab_tbl %>% select(measurement_id, 
+                                    person_id,
+                                    organism_concept_id,
+                                    organism_concept_name, 
+                                    positivity_datetime), by = 'person_id') 
+
+  tbl <- tbl %>% inner_join(cdm_tbl("measurement") %>% select(measurement_date,
+                                    measurement_id, 
+                                    person_id,
+                                    measurement_concept_id,
+                                    measurement_concept_name,  
+                                    value_as_number,
+                                    value_as_concept_name,
+                                    specimen_concept_id, 
+                                    specimen_source_value), by = c("measurement_id", "person_id")) %>% 
+            collect_new() 
+            
+  tbl <- tbl %>% rename(bacteremia_date = measurement_date) %>%
+                  filter(grepl("blood", specimen_source_value, ignore.case = TRUE))
+       
     return(tbl)
 }
 
@@ -170,8 +213,16 @@ find_scd_transplant_with_procedure <- function(scd_cohort,
                                                 end_date,
                                                 is_pre = FALSE,
                                                 cut_off = 365, min_days = 0){
-
-    tbl <- transplant_cohort %>% filter(transplant_date >= start_date, transplant_date <= end_date) %>%
+  if (is.null(end_date) & is.null(start_date)){     
+      tbl <- transplant_cohort
+  } else if(!is.null(end_date) & !is.null(start_date)){
+      tbl <- transplant_cohort %>% filter(transplant_date >= start_date, transplant_date <= end_date) 
+  } else if(is.null(start_date)){
+      tbl <- transplant_cohort %>% filter(transplant_date <= end_date)
+  } else {
+      tbl <- transplant_cohort %>% filter(transplant_date >= start_date)
+  }
+    tbl <- tbl %>%
                 group_by(person_id) %>%
                 slice_min(transplant_date, n = 1, with_ties = FALSE) %>% ungroup() %>%
                 inner_join(scd_cohort, by = "person_id") %>% collect_new() %>%
@@ -211,7 +262,8 @@ get_outcome_measurements <- function(cohort,
                                      min_days = 0,
                                      max_days = 365,
                                      is_pre = FALSE,
-                                     is_closet = TRUE) {
+                                     is_closet = TRUE, 
+                                     pivot_date) {
   tbl <- cohort %>%
     inner_join(lab_tbl %>% select(measurement_date, 
                                     person_id,
@@ -236,15 +288,15 @@ get_outcome_measurements <- function(cohort,
                                     # measurement_result_date
                                     ), by = 'person_id') %>% collect_new()
   if(is_pre){
-    tbl <- tbl %>% filter(as.numeric(difftime(ce_date, measurement_date, units = "days")) >= min_days,
-                          as.numeric(difftime(ce_date, measurement_date, units = "days")) <= max_days)
+    tbl <- tbl %>% filter(as.numeric(difftime({{pivot_date}}, measurement_date, units = "days")) >= min_days,
+                          as.numeric(difftime({{pivot_date}}, measurement_date, units = "days")) <= max_days)
   } else {
-    tbl <- tbl %>% filter(as.numeric(difftime(measurement_date, ce_date, units = "days")) >= min_days,
-                          as.numeric(difftime(measurement_date, ce_date, units = "days")) <= max_days)
+    tbl <- tbl %>% filter(as.numeric(difftime(measurement_date, {{pivot_date}}, units = "days")) >= min_days,
+                          as.numeric(difftime(measurement_date, {{pivot_date}}, units = "days")) <= max_days)
   }
   if(is_closet){
     tbl <- tbl %>% group_by(person_id, transplant_date, measurement_concept_id) %>% 
-                  slice_min(abs(difftime(measurement_date, ce_date, units = "days")), n = 1, with_ties = FALSE) %>% ungroup()
+                  slice_min(abs(difftime(measurement_date, {{pivot_date}}, units = "days")), n = 1, with_ties = FALSE) %>% ungroup()
   }
     tbl <- tbl %>% inner_join(mx_codeset %>% select(concept_id) %>% collect_new(), 
                               by = c("measurement_concept_id" = "concept_id"))   
@@ -256,7 +308,8 @@ get_outcome_drugs <- function(cohort,
                               min_days = 0,
                               max_days = 365,
                               is_pre = FALSE,
-                              is_closet = TRUE) {
+                              is_closet = TRUE,
+                              pivot_date) {
   tbl <- cohort %>% inner_join(cdm_tbl("drug_exposure") %>% select(drug_exposure_id, 
                                                                 person_id, 
                                                                 drug_concept_id, 
@@ -269,15 +322,15 @@ get_outcome_drugs <- function(cohort,
                                                                 days_supply, 
                                                                 route_concept_name), by = c("person_id")) %>% collect_new()
   if(is_pre){
-    tbl <- tbl %>% filter(as.numeric(difftime(ce_date, drug_exposure_start_date, units = "days")) >= min_days,
-                          as.numeric(difftime(ce_date, drug_exposure_start_date, units = "days")) <= max_days)
+    tbl <- tbl %>% filter(as.numeric(difftime({{pivot_date}}, drug_exposure_start_date, units = "days")) >= min_days,
+                          as.numeric(difftime({{pivot_date}}, drug_exposure_start_date, units = "days")) <= max_days)
   } else {
-    tbl <- tbl %>% filter(as.numeric(difftime(drug_exposure_start_date, ce_date, units = "days")) >= min_days,
-                          as.numeric(difftime(drug_exposure_start_date, ce_date, units = "days")) <= max_days)
+    tbl <- tbl %>% filter(as.numeric(difftime(drug_exposure_start_date, {{pivot_date}}, units = "days")) >= min_days,
+                          as.numeric(difftime(drug_exposure_start_date, {{pivot_date}}, units = "days")) <= max_days)
   }
   if(is_closet){
     tbl <- tbl %>% group_by(person_id, transplant_date, drug_concept_id) %>% 
-                  slice_min(abs(difftime(drug_exposure_start_date, ce_date, units = "days")), n = 1, with_ties = FALSE) %>% ungroup()
+                  slice_min(abs(difftime(drug_exposure_start_date, {{pivot_date}}, units = "days")), n = 1, with_ties = FALSE) %>% ungroup()
   }
     tbl <- tbl %>% inner_join(dx_codeset %>% select(concept_id) %>% collect_new(), by = c("drug_concept_id" = "concept_id")) 
     return(tbl)
@@ -337,22 +390,23 @@ get_outcome_conditions <- function(cohort,
                                    min_days = 0,
                                    max_days = 365,
                                    is_pre = FALSE,
-                                   is_closet = TRUE) {
+                                   is_closet = TRUE,
+                                   pivot_date) {
   tbl <- cohort %>% inner_join(cdm_tbl("condition_occurrence") %>% select(condition_occurrence_id, 
                                                                 person_id, 
                                                                 condition_concept_id, 
                                                                 condition_concept_name, 
                                                                 condition_start_date), by = c("person_id")) %>% collect_new()
   if(is_pre){
-    tbl <- tbl %>% filter(as.numeric(difftime(ce_date, condition_start_date, units = "days")) >= min_days,
-                          as.numeric(difftime(ce_date, condition_start_date, units = "days")) <= max_days)
+    tbl <- tbl %>% filter(as.numeric(difftime({{pivot_date}}, condition_start_date, units = "days")) >= min_days,
+                          as.numeric(difftime({{pivot_date}}, condition_start_date, units = "days")) <= max_days)
   } else {
-    tbl <- tbl %>% filter(as.numeric(difftime(condition_start_date, ce_date, units = "days")) >= min_days,
-                          as.numeric(difftime(condition_start_date, ce_date, units = "days")) <= max_days)
+    tbl <- tbl %>% filter(as.numeric(difftime(condition_start_date, {{pivot_date}}, units = "days")) >= min_days,
+                          as.numeric(difftime(condition_start_date, {{pivot_date}}, units = "days")) <= max_days)
   }
   if(is_closet){
     tbl <- tbl %>% group_by(person_id, transplant_date, condition_concept_id) %>%
-                  slice_min(abs(difftime(condition_start_date, ce_date, units = "days")), n = 1, with_ties = FALSE) %>% ungroup()
+                  slice_min(abs(difftime(condition_start_date, {{pivot_date}}, units = "days")), n = 1, with_ties = FALSE) %>% ungroup()
   }
     tbl <- tbl %>% inner_join(dx_codeset %>% select(concept_id) %>% collect_new(), by = c("condition_concept_id" = "concept_id"))
     return(tbl)
@@ -363,22 +417,23 @@ get_outcome_procedures <- function(cohort,
                                    min_days = 0,
                                    max_days = 365, 
                                    is_pre = FALSE,
-                                   is_closet = TRUE) {
+                                   is_closet = TRUE,
+                                   pivot_date) {
   tbl <- cohort %>% inner_join(cdm_tbl("procedure_occurrence") %>% select(procedure_occurrence_id, 
                                                                 person_id, 
                                                                 procedure_concept_id, 
                                                                 procedure_concept_name, 
                                                                 procedure_date), by = c("person_id")) %>% collect_new()
   if(is_pre){
-    tbl <- tbl %>% filter(as.numeric(difftime(ce_date, procedure_date, units = "days")) >= min_days,
-                          as.numeric(difftime(ce_date, procedure_date, units = "days")) <= max_days)
+    tbl <- tbl %>% filter(as.numeric(difftime({{pivot_date}}, procedure_date, units = "days")) >= min_days,
+                          as.numeric(difftime({{pivot_date}}, procedure_date, units = "days")) <= max_days)
   } else {  
-    tbl <- tbl %>% filter(as.numeric(difftime(procedure_date, ce_date, units = "days")) >= min_days,
-                          as.numeric(difftime(procedure_date, ce_date, units = "days")) <= max_days)
+    tbl <- tbl %>% filter(as.numeric(difftime(procedure_date, {{pivot_date}}, units = "days")) >= min_days,
+                          as.numeric(difftime(procedure_date, {{pivot_date}}, units = "days")) <= max_days)
   }
   if(is_closet){
     tbl <- tbl %>% group_by(person_id, transplant_date, procedure_concept_id) %>% 
-                  slice_min(abs(difftime(procedure_date, ce_date, units = "days")), n = 1, with_ties = FALSE) %>% ungroup()
+                  slice_min(abs(difftime(procedure_date, {{pivot_date}} , units = "days")), n = 1, with_ties = FALSE) %>% ungroup()
   }
     tbl <- tbl %>% inner_join(px_codeset %>% select(concept_id) %>% collect_new(), by = c("procedure_concept_id" = "concept_id"))                
     return(tbl)
@@ -391,8 +446,9 @@ get_outcome_organism <- function(cohort,
                                      min_days = 0,
                                      max_days = 365,
                                      is_pre = FALSE,
-                                     is_closet = TRUE) {
-  tbl <- cohort %>% select(person_id, ce_date, transplant_date, site) %>%
+                                     is_closet = TRUE,
+                                     pivot_date) {
+  tbl <- cohort %>% select(person_id, {{pivot_date}}, transplant_date, site) %>%
     left_join(lab_tbl %>% select(measurement_id, 
                                     person_id,
                                     organism_concept_id,
@@ -411,21 +467,42 @@ get_outcome_organism <- function(cohort,
             collect_new() 
             # mutate(bacteremia_date = as.Date(positivity_datetime, format = "%Y-%m-%d"))
   if(is_pre){
-    tbl <- tbl %>% filter(as.numeric(difftime(ce_date, measurement_date, units = "days")) >= min_days,
-                          as.numeric(difftime(ce_date, measurement_date, units = "days")) <= max_days)
+    tbl <- tbl %>% filter(as.numeric(difftime({{pivot_date}}, measurement_date, units = "days")) >= min_days,
+                          as.numeric(difftime({{pivot_date}}, measurement_date, units = "days")) <= max_days)
   } else {
-    tbl <- tbl %>% filter(as.numeric(difftime(measurement_date, ce_date, units = "days")) >= min_days,
-                          as.numeric(difftime(measurement_date, ce_date, units = "days")) <= max_days)
+    tbl <- tbl %>% filter(as.numeric(difftime(measurement_date, {{pivot_date}}, units = "days")) >= min_days,
+                          as.numeric(difftime(measurement_date, {{pivot_date}}, units = "days")) <= max_days)
   }
   if(is_closet){
     tbl <- tbl %>% group_by(person_id, transplant_date, measurement_concept_id) %>% 
-                  slice_min(abs(difftime(measurement_date, ce_date, units = "days")), n = 1, with_ties = FALSE) %>% 
+                  slice_min(abs(difftime(measurement_date, {{pivot_date}}, units = "days")), n = 1, with_ties = FALSE) %>% 
                   rename(bacteremia_date = measurement_date) %>%
-                  filter(bacteremia_date >= ce_date) %>% ungroup() %>%
+                  filter(bacteremia_date >= {{pivot_date}}) %>% ungroup() %>%
                   filter(grepl("blood", specimen_source_value, ignore.case = TRUE))
                   # filter(value_as_concept_name == "Detected" | value_as_concept_name == "Positive" | !is.na(positivity_datetime),
   }
        
     return(tbl)
 }
-# tbl %>% filter(!is.na(positivity_datetime), )
+
+# get immune reconstitution status
+# only values above the specific immune threshold, within 1 year of transplant and before the second transplant (if any)
+get_immune_reconstitution <- function(threshold, 
+                                      cohort_tbl, 
+                                      immune_tbl,
+                                      immune_var){
+  tbl <- cohort_tbl %>% left_join(immune_tbl %>% 
+                                select(person_id, {{immune_var}}, measurement_date) %>% collect(), by = "person_id") %>%
+                mutate(days_since_ce = as.numeric(difftime(measurement_date, transplant_date, units = "days"))) %>%
+                filter(days_since_ce >= 0, days_since_ce <= 365, 
+                        is.na(second_transplant_date) | days_since_ce <= second_transplant_date,
+                        {{immune_var}} >= threshold) %>% 
+                group_by(person_id) %>%
+                slice_min(days_since_ce, n = 1, with_ties = FALSE) %>% ungroup() %>%
+                mutate(reconstitute_3mon = if_else(days_since_ce <= 90, TRUE, FALSE),
+                        reconstitute_6mon = if_else(days_since_ce <= 180, TRUE, FALSE),
+                        reconstitute_9mon = if_else(days_since_ce <= 270, TRUE, FALSE), 
+                        reconstitute_12mon = if_else(days_since_ce <= 365, TRUE, FALSE)) #%>%
+                        # select(person_id, starts_with("CD3"))
+  return(tbl)
+}

@@ -68,8 +68,7 @@ config_append('extra_packages', c())
                                         mx_codeset = load_codeset("cd3_cd4_cd8_mx"),
                                         is_pre = FALSE, is_closet = FALSE) 
 #   rslt$CD348 %>% view()
-  # check units and add type of measurement
-  # the units are mostly cells per microliter, some are cells per cubic millimeter
+  
   # exclude the ones with percent as unit
   rslt$CD348 %>% mutate(CDtype = case_when(grepl("T4 helper", measurement_concept_name, ignore.case = TRUE) ~ "CD4",
                                 grepl("CD4", measurement_concept_name, ignore.case = TRUE) ~ "CD4",
@@ -130,10 +129,23 @@ config_append('extra_packages', c())
    # majority with units nanogram per milliliter
    # assume missing units are nanogram per milliliter  
    # no unit conversion done                                              
-   rslt$ferritin %>% output_tbl(name = "covar_ferritin_mx")                                                            
+   rslt$ferritin %>% collect() %>% output_tbl(name = "covar_ferritin_mx")                                                            
    append_sum(cohort = 'covar_ferritin_px',
                      persons = rslt$ferritin %>% distinct_ct())
 
+   # the previous ferritin table was indexed based on the transplant dates, we just need all the ferritin measurements 
+   rslt$ferritin <- find_measurements(cohort = results_tbl("study_cohorts"), 
+                                mx_codeset = load_codeset("ferritin_lab")) %>% 
+                    select(person_id, 
+                        ferritin_date = measurement_date,
+                        ferritin = value_as_number,
+                        measurement_concept_id, measurement_concept_name, unit_concept_name, range_high, range_low) %>% 
+                        mutate(ferritin_level = case_when(ferritin < 1000 ~ "low",
+                                                ferritin >= 1000 & ferritin <= 3000 ~ "moderate",
+                                                ferritin > 3000 ~ "high",
+                                                TRUE ~ NA)) 
+    rslt$ferritin %>% collect() %>% output_tbl(name = "covar_ferritin_mx")    
+   
    # atleast 60 days after ce_date
   rslt$creatinine <- get_outcome_measurements(cohort = results_tbl("study_cohorts"), 
                                         mx_codeset = load_codeset("serum_creatinine"),
@@ -144,56 +156,142 @@ config_append('extra_packages', c())
   rslt$creatinine %>% filter(!is.na(value_as_number)) %>% output_tbl(name = "covar_creatinine_mx")
   append_sum(cohort = 'serum_creatinine',
                      persons = rslt$creatinine %>% distinct_ct())
+
   # VOD indicators
-  rslt$defibrotide <- get_outcome_drugs(cohort = results_tbl("study_cohorts"), 
-                                        dx_codeset = load_codeset("defibrotide_rx"),
-                                        is_pre = FALSE, is_closet = FALSE) 
-#   rslt$defibrotide %>% group_by(drug_concept_name, route_concept_name) %>% 
-#                 summarise(n = n()) %>% view()
-  rslt$abdominal_ultrasound <- get_outcome_procedures(cohort = results_tbl("study_cohorts"),
-                                                px_codeset = load_codeset("abdominal_ultrasound_px"),
-                                                is_pre = FALSE, is_closet = FALSE)
-  rslt$bilirubin <- get_outcome_measurements(cohort = results_tbl("study_cohorts"),
-                                                mx_codeset = load_codeset("bilirubin_mx"),
-                                                is_pre = FALSE, is_closet = FALSE)
-   #select patients with defibrotide or (abdominal ultrasound and bilirubin > 2mg/L 3 days apart)
-   rslt$defibrotide %>% output_tbl(name = "defibrotide_rx")
-   rslt$abdominal_ultrasound %>% output_tbl(name = "abdominal_ultrasound_px")
-   rslt$bilirubin %>% output_tbl(name = "bilirubin_mx")
+  rslt$defibrotide <- find_drugs(dx_codeset = load_codeset("defibrotide_rx") %>% mutate(type = FALSE)) %>%
+                        inner_join(results_tbl("study_cohorts") %>% distinct(person_id), by = "person_id")
+  rslt$abdominal_ultrasound <- find_procedures(procedure_codeset_name = "abdominal_ultrasound_px") %>%
+                        inner_join(results_tbl("study_cohorts") %>% distinct(person_id), by = "person_id")
+  rslt$bilirubin <- find_measurements(cohort = results_tbl("study_cohorts"),
+                                mx_codeset = load_codeset("bilirubin_mx"))
+
+   #select patients with defibrotide or (abdominal ultrasound and bilirubin > 2mg/L 2 days apart)
+   rslt$defibrotide %>% collect() %>% output_tbl(name = "defibrotide_rx")
+   rslt$abdominal_ultrasound %>% collect() %>% output_tbl(name = "abdominal_ultrasound_px")
+   rslt$bilirubin %>% collect() %>% output_tbl(name = "bilirubin_mx")
   
-  # select patients with defibrotide or (abdominal ultrasound and bilirubin > 2mg/L 3 days apart)
   # expecting many to many relationship because of multiple ultrasound per day and multiple bilirubin measurements per day
-  rslt$bilirubin %>% filter(value_as_number> 2) %>%
-                        arrange(person_id, measurement_date) %>% select(person_id, transplant_date, bilirubin = value_as_number, 
-                                                bilirubin_date = measurement_date) %>% 
-                                                distinct(person_id, transplant_date,  bilirubin_date) %>% 
-                        inner_join(rslt$abdominal_ultrasound %>% arrange(person_id, procedure_date) %>% 
-                                distinct(person_id, transplant_date, abd_ultrasound_date = procedure_date), 
-                                by = c("person_id", "transplant_date"), relationship = "many-to-many") %>% 
-                                filter(abs(as.numeric(difftime(abd_ultrasound_date, bilirubin_date, units = "days"))) <= 3) %>%
-                                group_by(person_id, transplant_date) %>% 
-                                slice_min(bilirubin_date, n = 1, with_ties = FALSE) %>%
-                        full_join(rslt$defibrotide %>% 
-                                select(person_id, transplant_date, defibrotide_date = drug_exposure_start_date) %>% 
-                                group_by(person_id, transplant_date) %>%
-                                slice_min(abs(as.numeric(difftime(defibrotide_date, transplant_date, units = "days"))), n = 1, with_ties = FALSE),
-                                by = c("person_id", "transplant_date"), relationship = "many-to-many") %>% 
-                                mutate(vod = TRUE) %>% 
-                                output_tbl(name = "covar_vod_dx")
+  # patients with (abdominal ultrasound and bilirubin > 2mg/L 3 days apart) within 90 days after transplant
+  # dont do the filter dates now because we dont know the transplant dates yet
+  bili_and_ultrasound <- results_tbl("bilirubin_mx") %>% filter(value_as_number> 2) %>%
+                        select(person_id, bilirubin = value_as_number, 
+                                bilirubin_date = measurement_date) %>% 
+                                distinct(person_id, bilirubin_date) %>% 
+                        inner_join(results_tbl("abdominal_ultrasound_px") %>% 
+                                select(person_id, abd_ultrasound_date = procedure_date) %>%
+                                distinct(person_id, abd_ultrasound_date), 
+                                by = c("person_id")) %>% #, relationship = "many-to-many") %>% 
+                        mutate(min_bili_abd_date := pmin(bilirubin_date, abd_ultrasound_date)) %>% collect() %>%
+                        filter(abs(as.numeric(difftime(abd_ultrasound_date, bilirubin_date, units = "days"))) <= 2) %>%
+                        distinct(person_id, min_bili_abd_date) %>% 
+                        mutate(vod_cat_1 = 1)
+                        # group_by(person_id, transplant_date) %>% 
+                        # slice_min(bilirubin_date, n = 1, with_ties = FALSE) %>%
+                        # filter(as.numeric(difftime(transplant_date, min_bili_abd_date, units = "days")) <= 90,
+                        #         min_bili_abd_date >= transplant_date)
+    bili_and_ultrasound %>% view()  
+    
+    # patients with (defibrotide AND abdominal ultrasound 2 days apart) within 90 days after transplant
+    defi_and_ultrasound <- results_tbl("defibrotide_rx") %>% #filter(as.numeric(difftime(drug_exposure_start_date, transplant_date, units = "days")) <= 90, 
+                                                #        drug_exposure_start_date >= transplant_date) %>%
+                           distinct(person_id, drug_exposure_start_date) %>%  
+                           inner_join(results_tbl("abdominal_ultrasound_px") %>% 
+                                     select(person_id, abd_ultrasound_date = procedure_date) %>%
+                                     distinct(), by = c("person_id")) %>%
+                           mutate(min_defi_abd_date := pmin(drug_exposure_start_date, abd_ultrasound_date)) %>% collect() %>%
+                           filter(abs(as.numeric(difftime(abd_ultrasound_date, drug_exposure_start_date, units = "days"))) <= 2) %>%
+                           distinct(person_id, min_defi_abd_date) %>% mutate(vod_cat_2 = 2)
+    defi_and_ultrasound %>% view()
+
+    # (Abdominal ultrasound AND total bilirubin >2 mg/dL within 2 days AND significant weight gain defined as: 
+    # weight gain on 3 consecutive measurements within 10 days of ultrasound OR weight gain >5% of 
+    # admission weight within 10 days of ultrasound) within 90 days of transplant     thed host    
+    # need the admission date
+    rslt$weight <- results_tbl("cdm_measurement") %>% filter(measurement_concept_id == 3013762) %>%
+        inner_join(results_tbl("study_cohorts") %>% distinct(person_id), by = "person_id") %>%
+        select(weight_date = measurement_date, measurement_id, person_id, weight = value_as_number)
+
+    bili_and_ultrasound_and_weight_gain <- rslt$weight %>% collect() %>% 
+        group_by(person_id, weight_date) %>%
+        slice_max(weight, n = 1, with_ties = FALSE) %>% ungroup() %>%
+        inner_join(bili_and_ultrasound, by = "person_id") %>%
+        distinct(person_id, min_bili_abd_date, weight_date, .keep_all = TRUE) %>% mutate(vod_cat = 3) %>% 
+        group_by(person_id) %>%
+        arrange(weight_date) %>% 
+        mutate(weight_gain_consec = if_else((weight - lag(weight, default = first(weight), n = 1L)) > 0 & (lag(weight, default = first(weight), n = 1L) - lag(weight, default = first(weight), n = 2L)) > 0, 1, 0)) %>% 
+        filter(abs(as.numeric(difftime(min_bili_abd_date, weight_date, units = "days"))) <= 10, 
+                weight_gain_consec == 1) %>%
+        slice_min(abs(as.numeric(difftime(min_bili_abd_date, weight_date, units = "days"))), n = 1, with_ties = FALSE) %>% 
+        select(person_id, weight_date, min_bili_abd_date) %>%
+        mutate(min_bili_abd_weight_date := pmin(weight_date, min_bili_abd_date)) %>% 
+        distinct(person_id, min_bili_abd_weight_date) %>%
+        mutate(vod_cat_3 = 3) %>% ungroup() 
+        
+    bili_and_ultrasound_and_weight_gain %>% view()
+    # Peritoneal drain placement procedure during transplant admission
+    # (this should show up as a procedure code during admission)  
+#     results_tbl("cdm_procedure_occurrence") %>% inner_join(results_tbl("study_cohorts") %>% distinct(person_id), by = "person_id") %>%
+#         filter(grepl("peritoneal",procedure_concept_name, ignore.case = TRUE),
+#                 grepl("insertion",procedure_concept_name, ignore.case = TRUE) |
+#                 grepl("catheter",procedure_concept_name, ignore.case = TRUE)) %>% 
+#                 distinct(procedure_concept_name,  procedure_concept_id) %>% 
+#                 view()
+
+    # could not find any codeset for peritoneal drain placement
+    # find codeset for abdominal drainage instead
+#     results_tbl("cdm_procedure_occurrence") %>% inner_join(results_tbl("study_cohorts") %>% distinct(person_id), by = "person_id") %>%
+#         filter(grepl("abdominal",procedure_concept_name, ignore.case = TRUE),
+#                 grepl("drainage",procedure_concept_name, ignore.case = TRUE)) %>% 
+#                 distinct(procedure_concept_name, procedure_concept_id) %>%
+#                 distinct(procedure_concept_name,  procedure_concept_id)
+
+    # the relevant codes for Peritoneal drain placement procedure
+    # and output results to a table
+    results_tbl("cdm_procedure_occurrence") %>% inner_join(results_tbl("study_cohorts") %>% distinct(person_id), by = "person_id") %>%
+                filter(procedure_concept_id %in% c(4816373,  2003547, 44816426, 2614742, 2781295, 2109464)) %>%  
+                collect() %>% output_tbl(name = "covar_abd_drainage_px")
+
+    # do the date filtering later
+    abd_drainage <- results_tbl("covar_abd_drainage_px") %>% 
+                inner_join(results_tbl("study_cohorts") %>% distinct(person_id, transplant_date), by = "person_id") %>%
+                # filter(abs(as.numeric(difftime(procedure_date, transplant_date, units = "days"))) <= 7) %>% 
+                select(person_id, abd_date = procedure_date) %>%
+                mutate(vod_cat_4 = 4) 
+
+    # Veno-occlusive disease (VOD) or sinusoidal obstruction syndrome (SOS) on patient problem list --- new criterion        
+    results_tbl("cdm_condition_occurrence") %>% inner_join(results_tbl("study_cohorts") %>% distinct(person_id), by = "person_id") %>%
+        filter(grepl("veno-occlusive", condition_concept_name, ignore.case = TRUE)) %>% 
+        # distinct(condition_concept_name) %>% view()
+        output_tbl(name = "covar_venoocclusive_dx")
+
+    vod_dx <- results_tbl("covar_venoocclusive_dx") %>% collect_new() %>%
+                inner_join(cohort_covars %>% distinct(person_id, transplant_date), by = "person_id") %>%
+                filter(condition_status_concept_id == 4230359 |
+                        condition_type_concept_id %in% c(2000000089)) %>%
+                # filter(condition_start_date >= transplant_date) %>%
+                select(person_id, veno_date = condition_start_date) %>% 
+                mutate(vod_cat_5 = 5)
+
+    defi_and_ultrasound %>% view()
+    defi_and_ultrasound %>% distinct_ct()
+
+    VOD <- defi_and_ultrasound %>% full_join(bili_and_ultrasound, by = c("person_id")) %>% 
+                full_join(bili_and_ultrasound_and_weight_gain, by = c("person_id")) %>%
+                full_join(abd_drainage %>% collect(), by = c("person_id")) %>%
+                full_join(vod_dx, by = c("person_id")) %>% 
+                mutate(vod = TRUE) %>% output_tbl(name = "covar_vod_dx")
+
+    VOD %>% view()
+    
 
   append_sum(cohort = 'defibrotide_drugs',
              persons = rslt$defibrotide %>% distinct_ct())
 
-  rslt$blood_culture <- get_outcome_organism(cohort=results_tbl("study_cohorts"),
-                                     lab_tbl=cdm_tbl("measurement_organism"),
-                                     mx_codeset = NULL,
-                                     min_days = 0,
-                                     max_days = 365,
-                                     is_pre = FALSE,
-                                     is_closet = TRUE) 
+  rslt$blood_culture <- find_organism(cohort=results_tbl("study_cohorts"),
+                                     lab_tbl=cdm_tbl("measurement_organism")) 
   rslt$blood_culture %>% filter(specimen_source_value != "Urine|Unknown (Blood)", 
                                 !grepl("yeast", organism_concept_name, ignore.case = TRUE)) %>% 
-                                output_tbl(name = "covar_bacteremia_dx", local = TRUE, file = TRUE)
+                                output_tbl(name = "covar_bacteremia_dx")
 
   rslt$blood_culture %>% view()
   append_sum(cohort = 'blood_culture',
@@ -231,12 +329,11 @@ config_append('extra_packages', c())
 #    append_sum(cohort = 'height',
 #                  persons = rslt$height %>% distinct_ct())
     
-   rslt$gvhd <- get_outcome_conditions(cohort = results_tbl("study_cohorts"), 
-                                                dx_codeset = load_codeset("gvhd_dx"),
-                                                is_pre = FALSE, is_closet = FALSE) 
+   rslt$gvhd <- find_conditions(cohort = results_tbl("study_cohorts"), 
+                                dx_codeset = load_codeset("gvhd_dx")) 
 #    rslt$gvhd %>% group_by(condition_concept_id, condition_concept_name) %>% 
 #                 summarise(n = n()) %>% view()
-   rslt$gvhd %>% output_tbl(name = "covar_gvhd_dx")
+   rslt$gvhd %>% collect() %>% output_tbl(name = "covar_gvhd_dx")
    append_sum(cohort = 'gvhd',
                   persons = rslt$gvhd %>% distinct_ct())
 
@@ -254,24 +351,40 @@ config_append('extra_packages', c())
 #     rslt$conditioning_px %>% view()
     append_sum(cohort = 'conditioning_px',
                       persons = rslt$conditioning_px %>% distinct_ct())
+    dx_conditioning <- load_codeset("conditioning_drugs_rx") %>% 
+                        mutate(type = case_when(grepl("busulfan", concept_name, ignore.case = TRUE) ~ "busulfan",
+                                                grepl("alemtuzumab", concept_name, ignore.case = TRUE) ~ "alemtuzumab",
+                                                grepl("fludarabine", concept_name, ignore.case = TRUE) ~ "fludarabine",
+                                                grepl("cyclophosphamide", concept_name, ignore.case = TRUE) ~ "cyclophosphamide",
+                                                grepl("hydroxyurea", concept_name, ignore.case = TRUE) ~ "hydroxyurea",
+                                                grepl("melphalan", concept_name, ignore.case = TRUE) ~ "melphalan",
+                                                grepl("thiotepa", concept_name, ignore.case = TRUE) ~ "thiotepa",
+                                                grepl("treosulfan", concept_name, ignore.case = TRUE) ~ "treosulfan",
+                                                TRUE ~ "Other")) 
+    find_drugs(dx_conditioning) %>% collect() %>% output_tbl("conditioning_drugs_rx")
+    find_procedures(procedure_codeset_name = "conditioning_tbi_px") %>% collect() %>% output_tbl("conditioning_tbi_px")
 
-    rslt$conditioning_dx %>% select(person_id, transplant_date, 
-                                concpet_id = drug_concept_id, 
+    results_tbl("conditioning_drugs_rx") %>% select(person_id,
+                                concept_id = drug_concept_id, 
                                 concept_name = drug_concept_name, 
-                                exposure_date = drug_exposure_start_date, 
-                                route = route_concept_name) %>% mutate(type = "drugs") %>%
-                             union(rslt$conditioning_px %>% select(person_id, 
-                                                                transplant_date,
-                                                                concpet_id = procedure_concept_id,
+                                exposure_date = drug_exposure_start_date,
+                                drug_type) %>% mutate(conditioning_type = "drugs") %>%
+                             union(results_tbl("conditioning_tbi_px") %>% select(person_id, 
+                                                                concept_id = procedure_concept_id,
                                                                 concept_name = procedure_concept_name,
-                                                                exposure_date = procedure_date) %>% mutate(type = "drugs", route = NA)) %>%
-                             output_tbl("conditioning_agents_rx_px")
-    # neutrophil counts
-    rslt$ANC <- get_outcome_measurements(cohort = results_tbl("study_cohorts"), 
-                                        mx_codeset = load_codeset("neutrophils_mx"),
-                                        is_pre = FALSE, is_closet = FALSE)   
+                                                                exposure_date = procedure_date) %>% mutate(conditioning_type = "tbi", drug_type = NA)) %>%
+                             collect() %>% output_tbl("conditioning_agents_rx_px")
+
+    # neutrophil counts with respect to transplant date
+#     rslt$ANC <- get_outcome_measurements(cohort = results_tbl("study_cohorts"), 
+#                                         mx_codeset = load_codeset("neutrophils_mx"),
+#                                         is_pre = FALSE, is_closet = FALSE)
+    # all neutrophil counts for patients in the cohort
+    rslt$ANC <- find_measurements(cohort = results_tbl("study_cohorts") %>%
+                                        select(person_id, transplant_date, site), 
+                                mx_codeset = load_codeset("neutrophils_mx"))  
     # check units
-    # rslt$ANC %>% output_tbl(name = "covar_anc_mx_original")
+    rslt$ANC %>% collect() %>% output_tbl(name = "covar_anc_mx_original")
     rslt$ANC <- results_tbl("covar_anc_mx_original") %>% collect_new()
 
     # all the records without information on measurement units are ways after transplant, could look at this later
@@ -288,130 +401,14 @@ config_append('extra_packages', c())
                                     measurement_concept_name, 
                                     unit_concept_name,
                                     range_high, range_low) %>% summarise(n = n()) %>% view()
-    # double check 3017732 and 3018199 and 3046321
-    # convert to cells/uL
-    rslt$ANC %>% filter(measurement_concept_id %in% c("3013650", "3017501", "3017732", "3038972", "3015586", "3046321", "3018199"),
-                        unit_concept_name != "No information",
-                        unit_concept_name != "percent", 
-                        !is.na(value_as_number)) %>%
-                mutate(ANC = case_when(unit_concept_name == "Kelvin per microliter" ~ value_as_number * 1000,
-                                                unit_concept_name == "thousand per microliter" ~ value_as_number*1000,
-                                                unit_concept_name == "thousand per cubic millimeter" ~ value_as_number*1000,
-                                                unit_concept_name == "billion per liter" ~ value_as_number*1000,
-                                                unit_concept_name == "cells per microliter" ~ value_as_number,
-                                                unit_concept_name == "per microliter" ~ value_as_number,
-                                                unit_concept_name == "microliter" ~ value_as_number,
-                                                unit_concept_name == "per cubic millimeter" ~ value_as_number,
-                                                unit_concept_name == "No matching concept" & measurement_concept_id == "3017732" ~ value_as_number * 1000,
-                                                TRUE ~ NA)) %>%
-                filter(!is.na(ANC)) %>% output_tbl(name = "covar_anc_mx")
     
     rslt$ANC <- results_tbl("covar_anc_mx") %>% collect_new()
-    # double check a few abnormal cases:
-    # 3017501 & invalid range_high, range_low: checked
-    # measurement_concept_id == "3017732", unit_concept_name == "microliter": patients with very different 
-    rslt$ANC %>% filter(measurement_concept_id == "3017732", unit_concept_name == "microliter") %>% 
-                select(person_id, transplant_date, measurement_date, value_as_number, range_high, range_low) %>% 
-                arrange(person_id, transplant_date, measurement_date) %>% view()
 
-    # plot on multiple pages and export to pdf
-    rslt$ANC %>% mutate(days = as.numeric(difftime(measurement_date, transplant_date, units = "days"))) %>%
-                        ggplot(aes(x = days, y = value_as_number)) + geom_point() + facet_wrap(~person_id) + theme_minimal()
-    ggsave("ANC_plot.pdf", device = "pdf", width = 8, height = 8, units = "in", dpi = 300)
-    # calculate ANC engraftment date
-    # anc_date is the first of 3 consecutive days with ANC >= 500 after nadir
-    nadir <- 7 
-    results_tbl("covar_anc_mx") %>% collect_new() %>% filter(!is.na(value_as_number)) %>%
-                group_by(person_id, transplant_date) %>%
-                arrange(person_id, transplant_date, measurement_date) %>%
-                mutate(anc_day = as.numeric(difftime(measurement_date, transplant_date, units = "days")),
-                       val_ct = ifelse(value_as_number >= 500, 1, 0)) %>% 
-                mutate(anc_consec = ifelse((lead(anc_day, 1) - anc_day == 1) & (lead(anc_day, n =2) - anc_day== 2) &
-                                          (val_ct + lead(val_ct, 1) + lead(val_ct, n =2)) == 3, TRUE, FALSE)) %>% 
-                ungroup() %>% 
-                filter(anc_consec == TRUE, anc_day >= nadir) %>%
-                group_by(person_id, transplant_date) %>%
-                slice_min(measurement_date, n = 1, with_ties = FALSE) %>%
-                rename(anc_engraftment_date = measurement_date) %>% 
-                select(-anc_day, -val_ct) %>%
-                output_tbl("covar_anc_engraftment_mx")
-
-   
-    # who had a another transplant after the first one?
-#     rslt$cohort %>% inner_join(results_tbl("transplant_px"), by = c("person_id")) %>% 
-#                 group_by(person_id) %>% 
-#                 filter(transplant_date > ce_date) %>% view()
-#                 summarise(relapse = n()) %>% filter(relapse > 1) %>% view()
-    # transplant counts: 
-    # how many transplants did each person have?
-    # find out the visit dates for each transplant
-#     visit_durations <- results_tbl("transplant_px") %>% inner_join(cdm_tbl("procedure_occurrence"), 
-#                                 by = c("person_id", "transplant_occurrence_id" = "procedure_occurrence_id")) %>%
-#                         select(person_id, transplant_occurrence_id, transplant_date, visit_occurrence_id, transplant_concept_name) %>%
-#                         inner_join(cdm_tbl("visit_occurrence") %>% select(visit_occurrence_id,
-#                                                                           visit_start_date,
-#                                                                           visit_end_date), by = c("visit_occurrence_id")) %>% 
-#                         distinct(person_id, transplant_date, .keep_all = TRUE) %>%
-#                         collect_new()
-                                                
-    # find all patients with at least 2 transplants, filter out case when procedures outside visit windows 
-    # group by visit, if the difference between 2 transplants is 1 day, then we'll take the 2nd one as the ce_date assuming that the first one
-    # was cancelled
-    # n = 604
-#     t <- rslt$cohort %>% mutate(transplant_date = as.Date(transplant_date, format = "%Y-%m-%d")) %>%
-#                 select(-transplant_date) %>%
-#                 inner_join(visit_durations %>% filter(transplant_date >= visit_start_date, 
-#                         transplant_date <= visit_end_date), by = c("person_id")) %>% 
-#                 group_by(person_id) %>%
-#                 summarise(transplant_count = n_distinct(transplant_date))
-
-#      # n = 549
-#      single_transplants_patid <- t %>% filter(transplant_count == 1) %>% 
-#                 inner_join(visit_durations %>% filter(transplant_date >= visit_start_date, 
-#                         transplant_date <= visit_end_date), by = c("person_id")) %>% 
-#                 distinct(person_id, transplant_date, transplant_occurrence_id)
-                 
-#     # when the gap between 2 transplants is a day, i think we could say that this is the same transplant and the transplant date is the later one
-#     # n = 9
-#     single_transplants_dup_patid <- rslt$cohort %>% mutate(transplant_date = as.Date(transplant_date, format = "%Y-%m-%d")) %>%
-#                 select(-transplant_date) %>%
-#                 inner_join(visit_durations %>% filter(transplant_date >= visit_start_date, 
-#                         transplant_date <= visit_end_date), by = c("person_id")) %>% 
-#                 group_by(person_id) %>% 
-#                 mutate(next_transplant_date = lead(transplant_date, order_by = transplant_date), 
-#                        next_transplant_occurrence_id = lead(transplant_occurrence_id, order_by = transplant_date),
-#                         transplant_count = n_distinct(transplant_date)) %>%
-#                 filter(transplant_count == 2, next_transplant_date - transplant_date <= 2) %>%
-#                 select(person_id, transplant_date = next_transplant_date, transplant_occurrence_id = next_transplant_occurrence_id)
-     
-#      # when the gap between 2 transplants is more than a day but there were only 2 transplants, it's ok and we'll take the 1st transqplant date
-#      # as ce_date and the 2nd one as the relapse date, 
-#      # n = 38 
-#      # n = 10 cases when both transplants happened in the same visit, already checked, not duplicated transplants
-#      two_transplants_patid <- rslt$cohort %>% mutate(transplant_date = as.Date(transplant_date, format = "%Y-%m-%d")) %>%
-#                 select(-transplant_date) %>%
-#                 inner_join(visit_durations %>% filter(transplant_date >= visit_start_date, 
-#                         transplant_date <= visit_end_date), by = c("person_id")) %>% 
-#                 group_by(person_id) %>% 
-#                 mutate(next_transplant_date = lead(transplant_date, order_by = transplant_date), 
-#                        next_transplant_occurrence_id = lead(transplant_occurrence_id, order_by = transplant_date),
-#                         transplant_count = n_distinct(transplant_date)) %>%
-#                 filter(transplant_count == 2, next_transplant_date - transplant_date > 2) %>%
-#                 select(person_id, transplant_date, next_transplant_date, transplant_occurrence_id, next_transplant_occurrence_id)
-
-#      two_transplants_patid <- two_transplants_patid %>% select(person_id, transplant_date, transplant_occurrence_id) %>% 
-#                 union(two_transplants_patid %>% select(person_id, transplant_date = next_transplant_date, transplant_occurrence_id = next_transplant_occurrence_id))
-
-#       single_transplants_patid %>% union(single_transplants_dup_patid) %>% 
-#                 union(two_transplants_patid) %>%
-#                 output_tbl("transplant_patid", local = TRUE, file = TRUE)
-#       # now onto patients with more than 2 transplants
-#       # n = 8
-#       # 4180183 probably had 3, the last 2 are 1 day apart, we should take the 1st one as ce_date and the 3rd one as relapse date
-#       # let's just discard these patients
-#       t %>% filter(transplant_count > 2) %>% select(person_id) %>% 
-#                 output_tbl("multi_transplants_patid", local = TRUE, file = TRUE)
-
+      message("last in-person visit")
+      rslt$visits <- cdm_tbl("visit_occurrence") %>% inner_join(results_tbl("study_cohorts"), by = "person_id") %>%
+            select(person_id, visit_occurrence_id, visit_start_date, visit_end_date, visit_concept_id) %>%
+            collect()
+      
       rslt$death <- cdm_tbl("death") %>% inner_join(results_tbl("study_cohorts"), by = "person_id") %>%
             select(person_id, death_date, cause_concept_name, death_impute_concept_name) %>%
             compute_new()
