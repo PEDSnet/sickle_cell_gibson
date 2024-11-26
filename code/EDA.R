@@ -33,30 +33,36 @@ rslt$cr_data_LIC_max <- results_tbl("cr_data") %>% collect() %>%
                                                 cutoffs = LIC_cutoffs,
                                                 value_type = "LIC", keep_tie = keep_ties_LIC, 
                                                 slice_by = "max") 
+# summary of LIC values
+LIC_ct <- results_tbl("cr_data") %>% filter(!is.na(LIC_type)) %>%
+                        group_by(record_id, LIC_type, transplant_date) %>% 
+                        summarise(no_LIC = n(), no_LIC_10 = sum(ifelse(is.na(LIC) | LIC <=10, 0, 1))) %>% ungroup() %>%
+                        pivot_wider(names_from = LIC_type, values_from = c("no_LIC", "no_LIC_10")) %>% 
+                        rename(no_LIC_pre = `no_LIC_pre-transplant`, no_LIC_post = `no_LIC_post-transplant`,
+                               no_LIC_over_10_pre = `no_LIC_10_pre-transplant`,
+                               no_LIC_over_10_post = `no_LIC_10_post-transplant`) %>%
+                        mutate(across(c("no_LIC_pre", "no_LIC_post", "no_LIC_over_10_pre", "no_LIC_over_10_post"), ~ifelse(is.na(.x), 0, .x))) %>% collect()
 
-# merge the most recent and highest LIC values 
-rslt$cr_data <- rslt$cr_data_LIC_recent %>% 
+rslt$LIC <- rslt$cr_data_LIC_recent %>% 
                         left_join(rslt$cr_data_LIC_max %>% select(record_id, LIC_max, LIC_3_max, 
                                                                 LIC_days_since_transplant_max, LIC_days_since_transplant_3_max,
                                                                 LIC_type_max,
-                                                                LIC_max_level, LIC_3_max_level), by = c("record_id", "LIC_type" = "LIC_type_max"))                              
+                                                                LIC_max_level, LIC_3_max_level, transplant_date), by = c("record_id", "LIC_type" = "LIC_type_max", "transplant_date")) %>%
+                        mutate(LIC_level_3_binary = if_else(LIC_3 < LIC_cutoffs_binary[1], "low", "high"),
+                                LIC_level_3_max_binary = if_else(LIC_3_max < LIC_cutoffs_binary[1], "low", "high"),
+                                across(c("LIC_level_3_max_binary", "LIC_level_3_binary"), ~factor(.x, levels = c("low", "high")))) 
 
-rslt$cr_data <- results_tbl("cr_data") %>% select(-c("LIC_other_unit", "LIC_date", 
-                                                "LIC_raw", "LIC_est_method", "is_ms", "LIC", "LIC_type", "site", "no_LIC_measurement")) %>% 
-                                        collect() %>% distinct() %>%
-                        left_join(rslt$cr_data %>% select("record_id", "LIC_type", "LIC_days_since_transplant",
-                                                        "LIC_3", "LIC_days_since_transplant_3", "LIC_level", "LIC_3_level", 
-                                                        "LIC_max", "LIC_3_max", "LIC_days_since_transplant_max", "LIC_days_since_transplant_3_max",
-                                                        "LIC_max_level", "LIC_3_max_level"), by = "record_id") %>%                               
-                                rename(transplant_date_cr = transplant_date, 
+rslt$LIC %>% output_tbl("cr_LIC_data")                          
+
+rslt$cr_data <- results_tbl("cr_data") %>% select(record_id, eligibility, transplant_date, 
+                                                        transplant_type, donor_relation, match_status, graft_manip, manip_type,
+                                                        graft_fail, graft_fail_date, second_transplant_date, chart_completion) %>%  
+                                        collect() %>% distinct() %>% 
+                        left_join(LIC_ct, by = c("record_id", "transplant_date")) %>%
+                        rename(transplant_date_cr = transplant_date, 
                                 transplant_type_cr = transplant_type, 
                                 second_transplant_date_cr = second_transplant_date,
-                                disease_relapse = graft_fail) %>% # Disease relapse: 
-                                mutate(LIC_level_3_binary = if_else(LIC_3 < LIC_cutoffs_binary[1], "low", "high"),
-                                LIC_level_3_max_binary = if_else(LIC_3_max < LIC_cutoffs_binary[1], "low", "high"),
-                                across(c("LIC_level_3_max_binary", "LIC_level_3_binary"), ~factor(.x, levels = c("low", "high")))) %>%
-                                copy_to_new(df = ., name = "cr_data") 
-# rslt$cr_data %>% view()                                
+                                disease_relapse = graft_fail) %>% copy_to_new(df = ., name = "cr_data")             
                                 
 rslt$study_cohorts <- results_tbl("study_cohorts") %>% 
                         filter(!is.na(record_id)) %>% # 21 patients were missed out from chart review, might be included later
@@ -86,7 +92,8 @@ rslt$transplant_px <- rslt$transplant_px %>%
                                                                 (is.na(second_transplant_date_cr) & chart_completion) ~ NA, #overwrite second transplant dates from EHR
                                                                 TRUE ~ second_transplant_date)) %>% 
                         distinct(record_id, second_transplant_date)
-rslt$study_cohorts <- rslt$study_cohorts %>% left_join(rslt$transplant_px, by = "record_id") %>%
+
+rslt$study_cohorts <- rslt$study_cohorts %>% left_join(rslt$transplant_px, by = "record_id") %>% 
                         group_by(person_id) %>%
                         slice_min(transplant_date, n = 1, with_ties = FALSE, na_rm = FALSE) %>% ungroup()
 
@@ -109,11 +116,26 @@ ferritin_pre <- rslt$study_cohorts %>% select(person_id, transplant_date) %>%
                 left_join(rslt$ferritin, by = "person_id") %>%
                 ferritin_classification(ferritin_type = "pre", no_ferritin = no_ferritin, keep_tie = keep_tie,
                                         ferritin_cutoff1 = ferritin_cutoff1, ferritin_cutoff2 = ferritin_cutoff2)
+# count number of ferritin measurements before transplant
+ferritin_pre_ct <- rslt$study_cohorts %>% select(person_id, transplant_date) %>% 
+                        left_join(rslt$ferritin, by = "person_id") %>% 
+                        filter(transplant_date > ferritin_date) %>% 
+                        filter(transplant_date - ferritin_date <= 365) %>%
+                        group_by(person_id, transplant_date) %>% 
+                        summarise(no_ferritin_pre = n()) %>% ungroup() %>% collect()
 
 ferritin_post <- rslt$study_cohorts %>% select(person_id, transplant_date) %>% 
                 left_join(rslt$ferritin, by = "person_id") %>%
                 ferritin_classification(ferritin_type = "post", no_ferritin = no_ferritin, keep_tie = keep_tie,
                                         ferritin_cutoff1 = ferritin_cutoff1, ferritin_cutoff2 = ferritin_cutoff2)
+
+# count number of ferritin measurements after transplant
+ferritin_post_ct <- rslt$study_cohorts %>% select(person_id, transplant_date) %>% 
+                        left_join(rslt$ferritin, by = "person_id") %>% 
+                        filter(transplant_date <= ferritin_date) %>% 
+                        filter(ferritin_date - transplant_date <= 365) %>%
+                        group_by(person_id, transplant_date) %>% 
+                        summarise(no_ferritin_post = n()) %>% ungroup() %>% collect()
 
 # slice by highest values 
 ferritin_pre_max <- rslt$study_cohorts %>% select(person_id, transplant_date) %>% 
@@ -127,21 +149,42 @@ ferritin_post_max <- rslt$study_cohorts %>% select(person_id, transplant_date) %
                                         ferritin_cutoff1 = ferritin_cutoff1, ferritin_cutoff2 = ferritin_cutoff2)
 
 
-ferritin <- ferritin_pre %>% select(person_id, ferritin_pre = ferritin_level, ferritin_days_pre = ferritin_days_since_transplant) %>%
-                full_join(ferritin_post %>% select(person_id, ferritin_post = ferritin_level, ferritin_days_post = ferritin_days_since_transplant), by = "person_id") %>%
-                full_join(ferritin_pre_max %>% select(person_id, ferritin_pre_max = ferritin_level, ferritin_days_pre_max = ferritin_days_since_transplant), by = "person_id") %>%
-                full_join(ferritin_post_max %>% select(person_id, ferritin_post_max = ferritin_level, ferritin_days_post_max = ferritin_days_since_transplant), by = "person_id") %>%
-                mutate(across(c("ferritin_post", "ferritin_pre", "ferritin_post_max", "ferritin_pre_max"), ~factor(.x, levels = c("low", "moderate", "high"))))
+ferritin <- ferritin_pre %>% select(person_id, transplant_date, 
+                                ferritin_pre = ferritin_level, 
+                                ferritin_days_pre = ferritin_days_since_transplant) %>%
+                full_join(ferritin_post %>% select(person_id, transplant_date, 
+                                                ferritin_post = ferritin_level, 
+                                                ferritin_days_post = ferritin_days_since_transplant), by =  c("person_id", "transplant_date")) %>%
+                full_join(ferritin_pre_max %>% select(person_id, transplant_date, 
+                                                ferritin_pre_max = ferritin_level, 
+                                                ferritin_days_pre_max = ferritin_days_since_transplant), by = c("person_id", "transplant_date")) %>%
+                full_join(ferritin_post_max %>% select(person_id, transplant_date, 
+                                                ferritin_post_max = ferritin_level, 
+                                                ferritin_days_post_max = ferritin_days_since_transplant), by = c("person_id", "transplant_date")) %>%
+                mutate(across(c("ferritin_post", "ferritin_pre", "ferritin_post_max", "ferritin_pre_max"), ~factor(.x, levels = c("low", "moderate", "high")))) %>%
+                left_join(ferritin_pre_ct, by = c("person_id", "transplant_date")) %>%
+                left_join(ferritin_post_ct, by = c("person_id", "transplant_date"))
 
-cohort_covars <- rslt$study_cohorts %>% left_join(ferritin %>% copy_to_new(df = ., name = "sdsd"), by = c("person_id"))
+ferritin %>% output_tbl("cr_ferritin_data")
+
+rslt$study_cohorts <- rslt$study_cohorts %>% #select(person_id, transplant_date, site, aim_2a_2, aim_2b_2,
+                                                # record_id, site_id, birth_date, gender, race, ethnicity,
+                                                # scd_concept_name, scd_type, transplant_concept_name, transplant_type,
+                                                # multi_transplants, eligibility, donor_relation, match_status,
+                                                # graft_manip, manip_type, disease_relapse, graft_fail_date, second_transplant_date_cr,
+                                                # chart_completion, transplant_date_consistency) %>% 
+                        left_join(ferritin %>% select(person_id, transplant_date, no_ferritin_pre, no_ferritin_post) %>% 
+                                        copy_to_new(df = ., name = "sdsd"), by = c("person_id", "transplant_date"))
 
 # cohort_covars %>% view()
 # patients that belong to aim_2a_2 with missing pre-ferritin should be excluded from that aim
 # no patients not belong to any aims 
 # rm("ferritin_pre", "ferritin_post", "ferritin_pre_max", "ferritin_post_max")
-cohort_covars <- cohort_covars %>% collect() %>% 
-                                mutate(aim_2a_2 = if_else(aim_2a_2 & is.na(ferritin_pre), FALSE, aim_2a_2)) %>%
-                                mutate(aim_2b_2 = if_else(aim_2b_2 & is.na(ferritin_post), FALSE, aim_2b_2)) %>%
+cohort_covars <- rslt$study_cohorts %>% collect() %>% 
+                                mutate(aim_2a_2 = if_else(is.na(no_ferritin_pre) | no_ferritin_pre == 0, FALSE, TRUE)) %>%
+                                mutate(aim_2b_2 = if_else(is.na(no_ferritin_post) | no_ferritin_post == 0, FALSE, FALSE)) %>%
+                                mutate(aim_2a_1 = if_else(is.na(no_LIC_pre) | no_LIC_pre == 0, FALSE, TRUE)) %>%
+                                mutate(aim_2b_1 = if_else(is.na(no_LIC_post) | no_LIC_post == 0, FALSE, TRUE)) %>%
                                 mutate(total_aims = rowSums(select(., starts_with("aim_")))) %>%
                                 filter(total_aims > 0) %>% select(-total_aims) %>% copy_to_new(df = ., name = "cohort_covars")
                 
@@ -170,6 +213,7 @@ last_visits <- last_visits %>% group_by(person_id) %>%
                 select(person_id, last_visit_since_ce, last_in_person_visit_since_ce)
 # last_visits %>% view()
 cohort_covars <- cohort_covars %>% left_join(last_visits %>% copy_to_new(df =., name = "sdfsd"), by = "person_id")
+
 # overall survival
 # there are 2 patients with more than 1 death causes
 # for patients with more than 1 transplant, death days since ce is the number of days since the 1st transplants
@@ -312,8 +356,7 @@ cohort_covars <- cohort_covars %>% left_join(CD3_reconstitute, by = "person_id")
                         left_join(CD8_reconstitute, by = "person_id") %>%
                         left_join(IgM_reconstitute, by = "person_id")
 
-# patients from multiple subgroups
-
+# resolve cases for patients from multiple subgroups
 cohort_covars <- cohort_covars %>% left_join(results_tbl("multi_subgroup_resolved") %>% collect(), by = "person_id") %>%
                 mutate(scd_type = if_else(!is.na(scd_type.y), scd_type.y, scd_type.x)) %>%
                 select(-scd_type.x, -scd_type.y) 
@@ -364,19 +407,34 @@ cohort_covars <- cohort_covars %>%
                         left_join(conditioning_agents_tbl, by = c("person_id", "transplant_date"))
 
 # combine match_status, transplant_type, and donor_relation into a single category
-cohort_covars <- cohort_covars %>% mutate(transplant_type_combined = case_when(transplant_type == "Autologous/Gene therapy" ~ "Autologous/Gene therapy",
-                                                match_status == "10/10" & donor_relation == "Related" ~ "Allogeneic: 10/10 Related",
-                                                match_status == "10/10" & donor_relation == "Unrelated" ~ "Allogeneic: 10/10 Unrelated",
-                                                match_status %in% c("8/10", "9/10") & donor_relation == "Related" ~ "Allogeneic: 8/10 or 9/10",
+cohort_covars <- cohort_covars %>% mutate(transplant_type_combined_old = case_when(transplant_type == "Autologous/Gene therapy" ~ "autologous/genetherapy",
+                                                match_status %in% c("8/8", "10/10") & donor_relation == "Related" ~ "matched related",
+                                                match_status %in% c("8/8", "10/10") & donor_relation == "Unrelated" ~ "matched unrelated",
+                                                match_status %in% c("8/10", "9/10", "7/8") & donor_relation == "Unrelated" ~ "mismatched unrelated",
+                                                match_status %in% c("8/10", "9/10", "7/8") & donor_relation == "Related" ~ "mismatched related",
+                                                match_status %in% c("Haploidentical", "5/8") ~ "Haploidentical",
                                                 match_status == "Cord Blood" ~ "Allogeneic: Cord Blood",
-                                                match_status == "Haploidentical" ~ "Allogeneic: Haploidentical",
-                                                TRUE ~ "other")) 
+                                                TRUE ~ "Unknown")) 
+# new criteria for transplant type is
+cohort_covars <- cohort_covars %>% mutate(transplant_type_combined = case_when(transplant_type == "Autologous/Gene therapy" ~ "autologous/genetherapy",
+                                                match_status %in% c("8/8", "10/10") & donor_relation == "Related" ~ "matched related",
+                                                match_status == "Cord Blood" ~ "Allogeneic: Cord Blood",
+                                                !is.na(match_status) & !is.na(donor_relation) ~ "matched unrelated/mismatched unrelated/mismatched related", 
+                                                TRUE ~ "Unknown")) 
 
+
+
+# get the list of patients with haploidentical unrelated status
+# cohort_covars %>% filter(match_status == "Haploidentical" & donor_relation == "Unrelated") %>% select(record_id) 
+# cohort_covars %>% filter(match_status %in% c("8/10", "9/10", "7/8"), donor_relation == "Related" ) %>% select(record_id)
 # get the record_id for the haploidentical autologous patient
-cohort_covars %>% filter(transplant_type == "Autologous/Gene therapy" & match_status == "Haploidentical") %>% select(record_id)                                                
+# cohort_covars %>% filter(transplant_type == "Autologous/Gene therapy" & match_status == "Haploidentical") %>% select(record_id)                                                
 # get the record for unknown match_status and allogeneic
-cohort_covars %>% filter(transplant_type == "Allogeneic", is.na(match_status), eligibility == "Yes", chart_completion) %>% select(record_id)
+# cohort_covars %>% filter(transplant_type == "Allogeneic", is.na(match_status), eligibility == "Yes", chart_completion) %>% select(record_id)
+# who had unknown status
+cohort_covars %>% filter(transplant_type_combined == "Unknown") %>% select(record_id, match_status, donor_relation) %>% view()
 
 # patients with prior leukemia diagnosis
-cohort_covars %>% filter(leukemia_prior, eligibility == "Yes") %>% select(record_id) %>% view()
-# cohort_covars %>% output_tbl("analytics_dataset")                        
+# cohort_covars %>% filter(leukemia_prior, eligibility == "Yes") %>% select(record_id) %>% view()
+cohort_covars %>% output_tbl("analytics_dataset")   
+

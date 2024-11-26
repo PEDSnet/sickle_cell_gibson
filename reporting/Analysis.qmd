@@ -74,6 +74,59 @@ my.render.cont <- function(x) {
     with(stats.apply.rounding(stats.default(x), digits=2), c("",
         "Median [Min, Max]"=sprintf("%s [%s, %s])", MEDIAN, MIN, MAX)))
 }
+
+cox_sum <- function(cox_sum){
+  cox_sum <- summary(cox_sum)
+  res <- cbind.data.frame(cox_sum$conf.int, cox_sum$coefficients)
+
+  res <- res[c("exp(coef)", "lower .95", "upper .95", "Pr(>|z|)")] %>% 
+              rename(HR = "exp(coef)", lower = "lower .95", upper = "upper .95", p_val = "Pr(>|z|)") %>%
+              mutate(`95 CI` = paste0("(",round(lower, 2), " - ", round(upper, 2), ")")) %>%
+              mutate(p_val = case_when(p_val <= 0.0001~ paste0(round(p_val, 5), "***"), 
+                                      p_val <= 0.001~ paste0(round(p_val, 5), "**"), 
+                                      p_val <= 0.01~ paste0(round(p_val, 5), "*"), 
+                                      p_val <= 0.05~ paste0(round(p_val, 5), "."), 
+                                      TRUE ~ as.character(round(p_val, 5)))) %>%
+              mutate(HR = round(HR, 2)) %>%
+              select("HR", "95 CI", "p_val")
+  return(res)
+}
+
+cox_fit_plot <- function(data, time_var, status_var, covariates, iron_level_var, plot_labels, sub_group){
+  data <- data %>% filter(scd_type == sub_group)
+
+  # Create the formula 
+  formula_str <- paste("Surv(", time_var, "/365.25,", status_var, ") ~", paste(covariates, collapse = " + "))
+  formula <- as.formula(formula_str)
+
+  # Fit the Cox proportional hazards model
+  cox_model <- coxph(formula, data = data)
+
+  iron_levels <- data %>% distinct(!!sym(iron_level_var)) 
+
+  # visualiza the impact on iron levels
+  iron_levels_df <- with(data,
+               data.frame(iron_levels, 
+                          age_at_ce = rep(mean(age_at_ce, na.rm = TRUE), length(iron_levels)),
+                          gender = rep("Female", length(iron_levels)),
+                          transplant_type_combined = rep("matched related",length(iron_levels)),
+                          has_busulfan = rep("No", length(iron_levels))
+                          )
+               )
+
+  # print(iron_levels_df)
+  # iron_levels_df <- iron_levels_df %>% rename(iron_level_var = test)
+  
+  plot_fit <- survfit(cox_model, newdata = iron_levels_df)
+  p <- ggsurvplot(plot_fit, data = iron_levels_df, 
+                  conf.int = FALSE, ggtheme = theme_minimal(),
+                  legend.labs = iron_levels %>% pull(), #c("Low", "High"),
+                  legend.title = plot_labels[1], #"Pre-transplant LIC levels", 
+                  xlab = "Years", ylab = paste(plot_labels[2], plot_labels[1], sub_group, sep = " "), #, #"Overall survival probability",
+                  #xlim = c(0, 5), ylim = c(0.5, 1.0)
+                  ) 
+  return(list(fit = cox_model, p = p))
+}
 ```
 
 ```{r echo=FALSE, message=FALSE, warning=FALSE, paged.print=FALSE}
@@ -106,7 +159,7 @@ cohort_ct <- cohort %>% distinct_ct()
   - immune reconstitution
   - time to neutrophil and platelet engraftment. 
 
-# Aim_2a: 
+## Aim_2a: 
 - GRFS (Graft failure free, GVHD-free survival survival): Time-to-event analysis with Cox proportional hazards model, Kaplan-Meier curves with log-rank test 
 - GVHD: Time-to-event analysis using Cox proportional hazard model and Kaplan-Meier curve with log-rank test.  
 - Disease relapse: Time-to-event analysis using Cox proportional hazard model and Kaplan-Meier curve with log-rank test.  
@@ -115,7 +168,13 @@ cohort_ct <- cohort %>% distinct_ct()
 - Bacteremia within 1 year after HSCT: Time-to-event analysis using a competing risks analysis. Competing risk includes death. 
 - Immune Reconstitution: time-to-event analysis using a competing risks analysis. Competing risks include death and graft failure requiring a second transplant. 
 
-## Background:
+## Aim_2b: 
+- GRFS: Time-to-event analysis with Cox proportional hazards model, Kaplan-Meier curves with log-rank test 
+- Overall survival: Time-to-event analysis using Cox proportional hazard model and Kaplan-Meier curve with log-rank test.  
+- Disease relapse: Time-to-event analysis using Cox proportional hazard model and Kaplan-Meier curve with log-rank test.  
+- GVHD: Time-to-event analysis using Cox proportional hazard model and Kaplan-Meier curve with log-rank test. 
+
+# Background:
 - Armand et al 2007:
   - n = 590, follow-up times = 8yrs since transplant
   - Disease: acute leukemia, MDS, chronic myelogenous leukemia CML, non-Hodgkin lymphoma NHL. 
@@ -146,201 +205,505 @@ cohort_ct <- cohort %>% distinct_ct()
 - Important covariates:
   - History of transplant: we would not have this info if the patients changed their care sites. However, chart reviewers should have caught this? Is it in the cohort eligibility? 
 
-## Aim 2a-2: Overall survival stratified by <span style="color:red">pre-transplant ferritin levels</span> using <span style="color:red">univariate analysis</span> 
-```{r cohort_covars_data}
-source("../code/EDA.R")
+# Overall survival
 
-cohort_covars <- cohort_covars %>% collect() %>%
-  mutate(#survival = if_else(survival, "Alive", "Death"), 
-         #censoring status 0=censored, 1=dead
-         survival_1yr = if_else(death_days_since_ce > 365.25 | is.na(death_days_since_ce), FALSE, TRUE),
-         survival_time_1yr_censored = case_when(death_days_since_ce <= 365.25 ~ death_days_since_ce, 
-                                                death_days_since_ce > 365.25 ~ 365.25,
-                                                is.na(death_days_since_ce) & !is.na(last_in_person_visit_since_ce) ~ pmin(last_in_person_visit_since_ce, 365.25, na.rm = TRUE),
-                                                TRUE ~ NA_real_),
-         survival_3yr = if_else(death_days_since_ce > 365.25*3 | is.na(death_days_since_ce), FALSE, TRUE),
-         survival_time_3yr_censored = case_when(death_days_since_ce <= 365.25*3 ~ death_days_since_ce, 
-                                                death_days_since_ce > 365.25*3 ~ 365.25*3,
-                                                is.na(death_days_since_ce) & !is.na(last_in_person_visit_since_ce) ~ pmin(last_in_person_visit_since_ce, 365.25*3, na.rm = TRUE),
-                                                TRUE ~ NA_real_),
-        survival_5yr = if_else(death_days_since_ce > 365.25*5 | is.na(death_days_since_ce), FALSE, TRUE),
-        survival_time_5yr_censored = case_when(death_days_since_ce <= 365.25*5 ~ death_days_since_ce, 
-                                               death_days_since_ce > 365.25*5 ~ 365.25*5, 
-                                               is.na(death_days_since_ce) & !is.na(last_in_person_visit_since_ce) ~ pmin(last_in_person_visit_since_ce, 365.25*5, na.rm = TRUE),
-                                               TRUE ~ NA_real_),
-         disease_relapse_days_since_ce = as.numeric(difftime(graft_fail_date, transplant_date, units = "days")),
-         disease_relapse_days_since_ce_5yr_censored = case_when(disease_relapse_days_since_ce <= 365.25*5 ~ disease_relapse_days_since_ce, 
-                                                          is.na(disease_relapse_days_since_ce) & !is.na(last_in_person_visit_since_ce) ~ pmin(last_in_person_visit_since_ce, 365.25*5, na.rm = TRUE),
-                                                TRUE ~ NA_real_),
-         disease_relapse_5yr = if_else(disease_relapse_days_since_ce > 365.25*5 | is.na(disease_relapse_days_since_ce), FALSE, TRUE))
+- match status: Haploidentical, matched related, matched unrelated, mismatched related and mismatched unrelated:
+    - matched related: match_status = 8/8 or 10/10 AND donor_relation = "Related"
+    - matched unrelated: match_status = 8/8 or 10/10 AND donor_relation = "Unrelated"
+    - mismatched related: match_status = 8/10, 9/10, or 7/8 AND donor_relation = "Related"
+    - mismatched unrelated: match_status = 8/10, 9/10, or 7/8 AND donor_relation = "Unrelated"
+    - haploididentical (related)
+    - autologous/genetherapy
+    - Allogeneic: Cord Blood
+
+## Aim 2a-2: Overall survival stratified by <span style="color:red">pre-transplant ferritin levels</span>
+```{r cohort_covars_survival_analysis, echo= FALSE, message=FALSE}
+stat_dataset <- results_tbl("survival_analysis_dataset") %>% collect() %>%
+                  mutate(transplant_type_combined = relevel(factor(transplant_type_combined), ref = "matched related"))
+                  # , levels = c("matched related", "matched unrelated", "mismatched related", "mismatched unrelated", "Haploidentical", "Allogeneic: Cord Blood", "autologous/genetherapy", "Unknown")))
+
+ferritin_data <- results_tbl("cr_ferritin_data") %>%
+                    select(-no_ferritin_pre, - no_ferritin_post) %>% collect()
+
+stat_dataset_ferritin <-  stat_dataset %>%
+            left_join(ferritin_data, by = c("person_id", "transplant_date"))                    
+          
+aim_2a_2 <- stat_dataset_ferritin %>% filter(chart_completion, eligibility == "Yes", !is.na(ferritin_pre)) %>%
+                  mutate(ferritin_pre = factor(ferritin_pre, levels = c("low", "moderate", "high")),
+                        ferritin_pre_max = factor(ferritin_pre_max, levels = c("low", "moderate", "high"))) 
+
+auto_ct <- aim_2a_2 %>% filter(!is.na(survival_time_5yr_censored)) %>% filter(transplant_type_combined == "autologous/genetherapy") %>% nrow()
+unknown_ct <- aim_2a_2 %>% filter(!is.na(survival_time_5yr_censored)) %>% filter(transplant_type_combined == "Unknown") %>% nrow()
+
+pre_ferritin_cox <- aim_2a_2 %>% filter(!is.na(survival_time_5yr_censored)) %>%
+                          select(record_id, ferritin_pre, age_at_ce, gender, graft_manip, transplant_type, scd_type, disease_relapse, graft_fail_date, donor_relation, survival_time_5yr_censored, survival_5yr, second_transplant, transplant_type_combined, graft_fail_5yr, graft_fail_days_since_ce_5yr_censored, has_busulfan)
+label(pre_ferritin_cox$transplant_type_combined) = "match status"
+table1(~gender + disease_relapse + age_at_ce + transplant_type_combined + ferritin_pre + has_busulfan + scd_type| survival_5yr, 
+        data = pre_ferritin_cox %>% mutate(survival_5yr = ifelse(survival_5yr ==1, "Dead", "Survived")), 
+        overall = FALSE, 
+        caption = "Overall survival at 5-yr following transplant")                          
 ```
 
-```{r aim_2a_2_data}
+- Multivariate Cox proportional hazard model adjusted for: 
+  - pre-transplant most recent ferritin levels: low(<1000 ng/mL), moderate (1000-2500 ng/mL), or high (>=2500 ng/mL)
+  - age at transplant: continuous 
+  - gender: female or male
+  - match status: 
+    - Allogeneic: Cord Blood, Haploidentical, Matched related, Matched unrelated, Mismatched related
+    - Removed: Mismatched related, Unknown, and autologous/genetherapy (see table above) due to missing obversation in outcomes. 
+  - has busulfan: yes or no
 
-# the way survival is coded here is different from table 1
-aim_2a_2 <- cohort_covars %>% filter(aim_2a_2) %>% 
-  mutate(ferritin_pre = factor(ferritin_pre, levels = c("low", "moderate", "high")),
-         ferritin_pre_max = factor(ferritin_pre_max, levels = c("low", "moderate", "high")))
+- **Results**:
+  - Increasing age is associated with a lower probability of survival. Although this association is statistically significant, the clinical impact appears to be minimal. It might be more informative to analyze this by breaking it down into age groups.
+  - Bulsufan treatment increased the death probability by almost 80% and this is borderline significant. 
+
+```{r overall_surv_pre_ferritin, echo= FALSE, message=FALSE, fig.width = 9, fig.height = 6}
+# pre_ferritin_cox %>% group_by(survival_5yr, transplant_type_combined) %>% summarise(n = n_distinct(record_id)) %>% view()
+pre_ferritin_cox_1 <- pre_ferritin_cox %>% filter(!(transplant_type_combined %in% c("autologous/genetherapy", "mismatched related")))
+# 0 is censored/survived, 1 is death
+# exclude match_status and graft_manip
+cox_ferritin_os <- coxph(Surv(survival_time_5yr_censored/365.25, survival_5yr) ~ ferritin_pre + age_at_ce + gender + transplant_type_combined + has_busulfan, 
+                data = pre_ferritin_cox_1)
+
+# pre_ferritin_cox_1 %>% group_by(ferritin_pre, gender, transplant_type_combined, has_busulfan) %>%
+#                       summarise(n_distinct(record_id))
+# visualiza the impact on iron levels
+ferritin_levels_df <- with(pre_ferritin_cox_1,
+               data.frame(ferritin_pre = c("low", "moderate", "high"), 
+                          age_at_ce = rep(mean(age_at_ce, na.rm = TRUE), 3),
+                          gender = rep("Female", 3),
+                          transplant_type_combined = rep("matched related",3),
+                          has_busulfan = rep("No", 3)
+                          # match_status = rep("Cord Blood", 3), 
+                          # disease_relapse = rep("No", 3), 
+                          # graft_manip = rep("No", 3), 
+                          # scd_type = rep("beta thalassemia major", 3)
+                          )
+               )
+fit <- survfit(cox_ferritin_os, newdata = ferritin_levels_df)
+ggsurvplot(fit, data = ferritin_levels_df, 
+                  conf.int = FALSE, ggtheme = theme_minimal(),
+                  legend.labs = c("Low", "Moderate", "High"),
+                  legend.title = "Pre-transplant ferritin levels", 
+                  xlab = "Years", ylab = "Overall survival probability",
+                  xlim = c(0, 5), ylim = c(0.5, 1.0), 
+                  risk.table = TRUE)#, risk.table.title = "test")
+
+# output overall survival curves
+# survfit2(res.cox) %>% ggsurvfit() +
+#   labs(
+#     x = "Years",
+#     y = "Overall survival probability",
+#     title = "Overall survival analysis pre-transplant ferritin"
+#     ) + 
+#   add_confidence_interval() +
+#   add_risktable()
 ```
 
-```{r overall_survival_pre_ferritin}
-# 5-yr survival
-# ggsurvfit::survfit2() returns a survfit object
-# survival::survfit()
-p_ferritin_max_pre <- survfit2(Surv(survival_time_5yr_censored/365.25, survival_5yr) ~      ferritin_pre_max, 
-        data = aim_2a_2 %>% filter(!is.na(survival_time_5yr_censored))) %>% 
-  ggsurvfit() +
-  labs(title = "Pre-transplant MAX ferritin level", 
-    x = "Years",
-    y = "Survival probability") + 
-  ylim(c(0.75, 1)) + 
-  add_confidence_interval() + 
-  add_risktable() # the numbers at risk
-# build plot (which constructs the risktable)
-built_p_ferritin_max_pre <- ggsurvfit_build(p_ferritin_max_pre)
-
-p_ferritin_pre <- survfit2(Surv(survival_time_5yr_censored/365.25, survival_5yr) ~      ferritin_pre, 
-        data = aim_2a_2 %>% filter(!is.na(survival_time_5yr_censored))) %>% 
-  ggsurvfit() +
-  labs(title = "Pre-transplant MOST RECENT ferritin level", 
-    x = "Years",
-    y = "Survival probability") + 
-    ylim(c(0.75, 1)) + 
-  add_confidence_interval() + 
-  add_risktable() # the numbers at risk
-# build plot (which constructs the risktable)
-built_p_ferritin_pre <- ggsurvfit_build(p_ferritin_pre)
-
-cowplot::plot_grid(built_p_ferritin_pre, built_p_ferritin_max_pre, ncol = 2)
-```
-
-```{r overall_survival_pre_ferritin_KM_2}
-s1 <- survfit(Surv(survival_time_5yr_censored/365.25, survival_5yr) ~ ferritin_pre, 
-                                data = aim_2a_2 %>% filter(!is.na(survival_time_5yr_censored)))
-s1 %>% 
-  tbl_survfit(
-    times = c(1, 3, 5),
-    label_header = "**{time}-yr survival (95% CI)**",
-    label = "Pre-transplant most recent ferritin level"
-  )
-
-s1_max <- survfit(Surv(survival_time_5yr_censored/365.25, survival_5yr) ~ ferritin_pre_max, 
-                                data = aim_2a_2 %>% filter(!is.na(survival_time_5yr_censored)))
-s1_max %>% 
-  tbl_survfit(
-    times = c(1, 3, 5),
-    label_header = "**{time}-yr survival (95% CI)**",
-    label = "Pre-transplant Max ferritin level"
-  )
-
-# comparing survival time between different groups
-logrank_sur_5yr <- survdiff(Surv(survival_time_5yr_censored, survival_5yr) ~ ferritin_pre, 
-          data = aim_2a_2 %>% filter(!is.na(survival_time_5yr_censored)))
-```
-
-- Overall survival: Time-to-event analysis using Cox proportional hazard model and Kaplan-Meier curve with log-rank test.  
-- Follow-up time for surviving patients is the last in-person visits censored by 5 yrs post-transplant
-- Exclusion: patients without in-person visits following transplants
-- Assumptions:
-  - non-parametric method
-  - univariate analysis
-  - OS was defined as time from transplant (CED) to death of any causes
-- The majority of patients in the low ferritin group stay in the low group using either most recent ferritin or max ferritin values(the left and right curves stay almost the same). By grouping by the max ferritin level, more survival patients shifted from the high to moderate groups (see the difference between the moderate and high groups between the left and right panels). 
-- Using the log-rank test to compare survival times between groups shows that there is **no significant difference acorrding to both most recent and max pre-transplant ferritin levels at 95%CI** (chisq = `r round(logrank_sur_5yr$chisq, 2)`, p = `r round(logrank_sur_5yr$pvalue, 4)`)
-- Using univariate Cox proportional hazard confirms the same result as the KM method, while the moderate ferritin group has a reduced death hazard than the low-ferritin group, and the high-ferritin group has a higher death hazard than the low-ferritin group, none of the ratios were significant at 95%CI.  
-- One interesting is that for the first 5 months following transplant, the high ferritin group has a higher survival. Need to verify this because this violates the proportional hazzard assumptions and we can't use the Cox model. 
-
-```{r overall_survival_pre_ferritin_Cox}
-coxph(Surv(survival_time_5yr_censored, survival_5yr) ~ ferritin_pre, 
-      data = aim_2a_2 %>% filter(!is.na(survival_time_5yr_censored))) %>% 
-  tbl_regression(exp = TRUE)
-```
-
-## Aim 2a-1: Overall survival stratified by <span style="color:red">pre-transplant ferritin levels</span> using <span style="color:red">multivariate analysis</span>
-```{r overall_survival_preferritin_multivariate}
-# res.cox <- coxph(Surv(survival_time_5yr_censored/365.25, survival_5yr) ~ ferritin_pre + age_at_ce + gender + scd_type, #+ transplant_type 
-#                 data = aim_2a_2 %>% filter(!is.na(survival_time_5yr_censored)))
+```{r overall_surv_pre_ferritin_sum, echo= FALSE, message=FALSE}
 # summary(res.cox)
+cox_sum(cox_ferritin_os) %>% prettify_kable()
 ```
 
-## Aim 2a-1: Disease relapse stratified by <span style="color:red">pre-transplant ferritin levels</span> using <span style="color:red">univariate analysis</span>
-```{r disease_relapse_pre_ferritin_KM_1}
-# 5-yr survival
-# ggsurvfit::survfit2() returns a survfit object
-# survival::survfit()
-print(survfit2(Surv(disease_relapse_days_since_ce_5yr_censored/365.25, disease_relapse_5yr) ~ ferritin_pre, 
-        data = aim_2a_2 %>% filter(!is.na(disease_relapse_days_since_ce_5yr_censored))) %>% 
-  ggsurvfit() +
-  labs(x = "Years",
-    y = "Relapse-free probability") + 
-  add_confidence_interval() +
-  add_risktable()) # the numbers at risk
+## Aim 2a-1: Overall survival stratified by <span style="color:red">pre-transplant LIC levels</span>
+```{r overall_surv_pre_LIC_data, echo= FALSE, message=FALSE, fig.width = 9, fig.height = 6}
+LIC_data <- results_tbl("cr_LIC_data") %>% 
+                  select(record_id, transplant_date, LIC, LIC_type, LIC_date, LIC_days_since_transplant, LIC_level, 
+                  LIC_3, LIC_days_since_transplant_3, LIC_3_level,
+                  LIC_max, LIC_3_max, LIC_days_since_transplant_max, LIC_days_since_transplant_3_max,
+                  LIC_max_level, LIC_3_max_level, LIC_level_3_binary, LIC_level_3_max_binary) %>%
+                  collect()
+                  
+stat_dataset_LIC <- stat_dataset %>% left_join(LIC_data, by = c("record_id", "transplant_date"))
+
+aim_2a_1 <- stat_dataset_LIC %>% filter(chart_completion, eligibility == "Yes", LIC_type == "pre-transplant", !is.na(LIC_level)) %>% 
+                mutate(LIC_level_3_binary = factor(LIC_level_3_binary, levels = c("low", "high")))
+
+pre_LIC_cox <- aim_2a_1 %>% filter(!is.na(survival_time_5yr_censored)) %>%
+                          select(record_id, LIC_level_3_binary, age_at_ce, gender, graft_manip, transplant_type, scd_type, disease_relapse, graft_fail_date, donor_relation, survival_time_5yr_censored, survival_5yr, second_transplant, transplant_type_combined, graft_fail_5yr, graft_fail_days_since_ce_5yr_censored, has_busulfan, site)
+# pre_LIC_cox %>% group_by(survival_5yr, transplant_type_combined) %>% summarise(n = n_distinct(record_id)) %>% view()
+
+auto_ct <- aim_2a_1 %>% filter(!is.na(survival_time_5yr_censored)) %>% filter(transplant_type_combined == "autologous/genetherapy") %>% nrow()
+unknown_ct <- aim_2a_1 %>% filter(!is.na(survival_time_5yr_censored)) %>% filter(transplant_type_combined == "Unknown") %>% nrow()
+
+label(pre_LIC_cox$transplant_type_combined) = "match status"
+label(pre_LIC_cox$LIC_level_3_binary) = "pre-transplant LIC-level"
+table1(~gender + disease_relapse + age_at_ce + transplant_type_combined + LIC_level_3_binary + has_busulfan + scd_type| survival_5yr, 
+        data = pre_LIC_cox %>% mutate(survival_5yr = ifelse(survival_5yr == 1, "Dead", "Survived")), 
+        overall = FALSE, 
+        caption = "Overall survival at 5-yr following transplant")
 ```
 
-```{r disease_relapse_pre_ferritin_KM_2}
-relapse_5yr_preferritin <- survfit(Surv(disease_relapse_days_since_ce_5yr_censored/365.25, disease_relapse_5yr) ~ ferritin_pre, 
-        data = aim_2a_2 %>% filter(!is.na(disease_relapse_days_since_ce_5yr_censored)))
-relapse_5yr_preferritin %>% 
-  tbl_survfit(
-    times = c(1, 3, 5),
-    label_header = "**{time}-yr relapse-free (95% CI)**",
-    label = "pre-transplant ferritin level"
-  )
+- Multivariate Cox proportional hazard model adjusted for: 
+  - pre-transplant most recent LIC levels: low(<5 mg Fe/g dry wt), or high (>5 mg Fe/g dry wt)
+  - age at transplant: continuous 
+  - gender: female or male
+  - match status: 
+    - Allogeneic: Cord Blood, Haploidentical, matched related, matched unrelated, mismatched related, mismatched unrelated
+    - Removed: Unknown and autologous/genetherapy (see table above) due to missing obversation in outcomes. 
+  - has busulfan: yes or no
 
-# comparing survival time between different groups
-logrank_relapse_5yr <- survdiff(Surv(disease_relapse_days_since_ce_5yr_censored/365.25, disease_relapse_5yr) ~ ferritin_pre, 
-        data = aim_2a_2 %>% filter(!is.na(disease_relapse_days_since_ce_5yr_censored)))
+```{r overall_surv_pre_LIC, echo= FALSE, message=FALSE, fig.width = 9, fig.height = 6}
+pre_LIC_cox_1 <- pre_LIC_cox %>% #filter(transplant_type_combined != "Unknown") %>% 
+    filter(transplant_type_combined != "autologous/genetherapy")
+# 0 is censored/survived, 1 is death
+# exclude match_status and graft_manip
+cox_LIC_os <- coxph(Surv(survival_time_5yr_censored/365.25, survival_5yr) ~ LIC_level_3_binary + age_at_ce + gender + transplant_type_combined + has_busulfan, 
+                data = pre_LIC_cox_1)
+
+# visualiza the impact on iron levels
+LIC_levels_df <- with(pre_LIC_cox_1,
+               data.frame(LIC_level_3_binary = c("low", "high"), 
+                          age_at_ce = rep(mean(age_at_ce, na.rm = TRUE), 2),
+                          gender = rep("Female", 2),
+                          transplant_type_combined = rep("matched related",2),
+                          has_busulfan = rep("No", 2)
+                          )
+               )
+fit <- survfit(cox_LIC_os, newdata = LIC_levels_df)
+ggsurvplot(fit, data = LIC_levels_df, 
+                  conf.int = FALSE, ggtheme = theme_minimal(),
+                  legend.labs = c("Low", "High"),
+                  legend.title = "Pre-transplant LIC levels", 
+                  xlab = "Years", ylab = "Overall survival probability",
+                  xlim = c(0, 5), ylim = c(0.5, 1.0)) 
+                  #risk.table = TRUE, risk.table.title = "test")
+
+# output overall survival curves
+# survfit2(res.cox) %>% ggsurvfit() +
+#   labs(
+#     x = "Years",
+#     y = "Overall survival probability",
+#     title = "Overall survival analysis pre-transplant ferritin"
+#     ) + 
+#   add_confidence_interval() +
+#   add_risktable()
 ```
 
-## Aim 2a_2: Overall survival stratified by <span style="color:red">pre-transplant LIC levels</span> using <span style="color:red">univariate analysis</span> 
-
-<span style="background-color:#FFFF00">How could patients with low- and moderate- LOC levels have a lower survival than high-LIC levels? </span>
-
-```{r aim_2a_1_data}
-aim_2a_1 <- cohort_covars %>% filter(LIC_type == "pre-transplant") %>%
-                filter(!is.na(survival_time_5yr_censored), !is.na(LIC_max_level))
-
-```
-```{r overall_survival_pre_LIC}
-# 5-yr survival
-# ggsurvfit::survfit2() returns a survfit object
-# survival::survfit()
-p_LIC_max_pre <- survfit2(Surv(survival_time_5yr_censored/365.25, survival_5yr) ~      LIC_max_level, 
-        data = aim_2a_1 %>% filter(!is.na(survival_time_5yr_censored), !is.na(LIC_max_level))) %>% 
-  ggsurvfit() +
-  labs(title = "Pre-transplant MAX LIC values", 
-    x = "Years",
-    y = "Survival probability"
-    ) + 
-  add_confidence_interval() + 
-  add_risktable() # the numbers at risk
-# build plot (which constructs the risktable)
-built_p_LIC_max_pre <- ggsurvfit_build(p_LIC_max_pre)
-
-p_LIC_pre <- survfit2(Surv(survival_time_5yr_censored/365.25, survival_5yr) ~ LIC_level, 
-        data = aim_2a_1 %>% filter(!is.na(survival_time_5yr_censored), !is.na(LIC_level))) %>% 
-  ggsurvfit() +
-  labs(title = "Pre-transplant MOST RECENT LIC values", 
-    x = "Years",
-    y = "Survival probability"
-    ) + 
-  add_confidence_interval() + 
-  add_risktable() # the numbers at risk
-# build plot (which constructs the risktable)
-built_p_LIC_pre <- ggsurvfit_build(p_LIC_pre)
-
-cowplot::plot_grid(built_p_LIC_pre, built_p_LIC_max_pre, ncol = 2)
+```{r overall_surv_pre_LIC_sum, echo= FALSE, message=FALSE}
+# summary(res.cox)
+cox_sum(cox_LIC_os) %>% prettify_kable()
 ```
 
-# Aim_2b: 
-- GRFS: Time-to-event analysis with Cox proportional hazards model, Kaplan-Meier curves with log-rank test 
-- Overall survival: Time-to-event analysis using Cox proportional hazard model and Kaplan-Meier curve with log-rank test.  
-- Disease relapse: Time-to-event analysis using Cox proportional hazard model and Kaplan-Meier curve with log-rank test.  
-- GVHD: Time-to-event analysis using Cox proportional hazard model and Kaplan-Meier curve with log-rank test. 
+# Graft failure
+## Aim 2a-2: Graft failure stratified by <span style="color:red">pre-transplant ferritin levels</span>
+```{r graft_fail_pre_ferritin_data, echo= FALSE, message=FALSE}
+unknown_ct <- pre_ferritin_cox %>% filter(!is.na(graft_fail_days_since_ce_5yr_censored)) %>% filter(transplant_type_combined == "Unknown") %>% nrow()
+
+label(pre_ferritin_cox$transplant_type_combined) = "match status"
+label(pre_ferritin_cox$survival_5yr) = "Dies within 5 years of post-transplant"
+
+table1(~gender + age_at_ce + transplant_type_combined + ferritin_pre + has_busulfan + survival_5yr| graft_fail_5yr, 
+        data = pre_ferritin_cox %>% mutate(graft_fail_5yr = ifelse(graft_fail_5yr ==1, "Graft failure", "Graft failure free")) %>%
+        mutate(survival_5yr = ifelse(survival_5yr == 1, "No", "Yes")), 
+        overall = FALSE, 
+        caption = "Graft failure at 5-yr following transplant")                          
+```
+
+- Competing risk analysis adjusted for: 
+  - pre-transplant most recent ferritin levels: low(<1000 ng/mL), moderate (1000-2500 ng/mL), or high (>=2500 ng/mL)
+  - age at transplant: continuous 
+  - gender: female (ref) or male
+  - match status: Allogeneic: Cord Blood, matched related (ref), matched unrelated/mismatched related/mismatched unrelated, autologous/genetherapy, and Unknown
+  - has busulfan: yes or no
+  - Outcomes: graft failure or death without graft failure 
+- Composite outcome: event-free survival: death/graft failure (whichever is first) 
+- n = `r unknown_ct` patients with unknown match status were removed from the analysis
+- 1 patient with graft failure dates before transplant dates were removed from this analysis: pending Nora's response. 
+
+```{r graft_fail_pre_ferritin, echo= FALSE, message=FALSE, fig.width = 9, fig.height = 6}
+# plot distribution of time to event for graft failure
+# cohort_covars %>%
+#   mutate(graft_fail_5yr = recode(graft_fail_5yr, "0" = "censored", "1" = "graft failure", "2" = "death")) %>%
+#   ggplot(aes(x = graft_fail_days_since_ce_5yr_censored/30, group = graft_fail_5yr, fill = factor(graft_fail_5yr))) +
+#   geom_histogram()
+
+pre_ferritin_cox_2 <- pre_ferritin_cox %>% 
+                          filter(transplant_type_combined != "Unknown") %>% 
+                          # filter(transplant_type_combined != "autologous/genetherapy") %>% 
+                          filter(!is.na(graft_fail_5yr)) %>% 
+                          mutate(graft_fail_5yr = recode(graft_fail_5yr, "0" = "censor", "1" = "graft failure", "2" = "death")) %>%
+                          mutate(graft_fail_5yr = factor(graft_fail_5yr,
+                                                  levels = c("censor", "graft failure", "death"))) %>% 
+                          filter(graft_fail_days_since_ce_5yr_censored >= 0) %>%
+                          mutate(transplant_type_combined = relevel(factor(transplant_type_combined), ref = "matched related"))
+
+# 0 is censored/survived, 1 is death
+# exclude match_status and graft_manip
+# km <- survfit(Surv(graft_fail_days_since_ce_5yr_censored/30, graft_fail_5yr) ~ ferritin_pre# + age_at_ce + gender + transplant_type_combined + has_busulfan, 
+#                 data = pre_ferritin_cox_2)
+
+# km$transitions
+# this plot function is especially for univariate analysis only
+# cant do this for multivariate
+
+# plot(km[, "graft failure"], 
+#               mark.time = FALSE, lwd = 2, xscale = 12,
+#               conf.int = FALSE, #lty = "dashed",
+#               col = c("red", "blue", "black"), 
+#               # linecolor = c("r", "b", "blue"),
+#               main = "Graft failure probability --- Competing Risk Kaplan Meier univariate analysis", 
+#               xlab = "Years post transplant", ylab = "Graft failure probability")
+# legend(2*12, .02, c("low ferritin", "moderate ferritin", "high ferritin"), 
+#       col = c("red", "blue", "black"), lty = "solid")
+
+compRisk_ferritin_gf <- coxph(Surv(graft_fail_days_since_ce_5yr_censored/30, graft_fail_5yr) ~ ferritin_pre + age_at_ce + gender + has_busulfan  + transplant_type_combined, 
+                data = pre_ferritin_cox_2, 
+                id = record_id)
+# print(res.cox, digits = 3)                
+# ggsurvplot(res.cox)
+
+# visualiza the impact on iron levels
+# ferritin_levels_df <- with(pre_ferritin_cox_2,
+#                data.frame(ferritin_pre = c("low", "moderate", "high"), 
+#                           age_at_ce = rep(mean(age_at_ce, na.rm = TRUE), 3),
+#                           gender = rep("Female", 3),
+#                           transplant_type_combined = rep("matched related",3),
+                          # has_busulfan = rep("No", 3)))
+
+# fit <- survfit(res.cox, newdata = ferritin_levels_df)
+# ggsurvplot(fit, data = ferritin_levels_df, 
+#                   conf.int = FALSE, ggtheme = theme_minimal(),
+#                   legend.labs = c("Low", "Moderate", "High"),
+#                   legend.title = "Pre-transplant ferritin levels", 
+#                   xlab = "Years", ylab = "Graft failure free probability",
+#                   xlim = c(0, 5), ylim = c(0.5, 1.0), 
+#                   risk.table = FALSE)#, risk.table.title = "test")
+```
+
+- Having a matched unrelated/mismatched unrelated/mismatched related transplant has a significant effect on graft failure. The risk of having graft failure increased by almost 3 folds comparing to having a matched related transplant. Gender is another significant factor, risk of graft failure in male patients is 2 and a haft times higher than females. 
+
+- Patients with a moderate ferritin levels are 60% less likely to die without graft failure than patients with low ferritin level pre-transplant. Age is another signicant factor; however, the OR is 1.07 which indicates that older patients have higher risk of death without graft failure than younger patients (Nora, does it make sense?). Being treated with bulsufan increased the risk death without GF by almost 3 folds. No patients receiving augologous/gene therapy transplant dies without graft failure; thus, this coefficient could be ignored. 
+
+- In the table below: 1:2 represents transition to Graft failure and 1:3 represents transition to death without graft failure
+```{r graft_fail_pre_ferritin_sum, echo= FALSE, message=FALSE}
+# summary(res.cox)
+cox_sum(compRisk_ferritin_gf) %>% prettify_kable()
+```
+
+## Aim 2a-1: Graft failure stratified by <span style="color:red">pre-transplant LIC levels</span>
+```{r graft_fail_pre_LIC_data, echo= FALSE, message=FALSE, fig.width = 9, fig.height = 6}
+# pre_LIC_cox %>% group_by(survival_5yr, transplant_type_combined) %>% summarise(n = n_distinct(record_id)) %>% view()
+
+cord_blood_ct <- aim_2a_1 %>% filter(!is.na(graft_fail_days_since_ce_5yr_censored)) %>% filter(transplant_type_combined == "Allogeneic: Cord Blood") %>% nrow()
+unknown_ct <- aim_2a_1 %>% filter(!is.na(graft_fail_days_since_ce_5yr_censored)) %>% filter(transplant_type_combined == "Unknown") %>% nrow()
+
+label(pre_LIC_cox$transplant_type_combined) = "match status"
+label(pre_LIC_cox$LIC_level_3_binary) = "pre-transplant LIC-level"
+label(pre_LIC_cox$survival_5yr) = "Dies within 5 years of post-transplant"
+
+table1(~gender + age_at_ce + transplant_type_combined + LIC_level_3_binary + has_busulfan + survival_5yr| graft_fail_5yr, 
+        data = pre_LIC_cox %>% mutate(graft_fail_5yr = recode(graft_fail_5yr, "0" = "censor", "1" = "graft failure", "2" = "death")) %>%
+                      mutate(graft_fail_5yr = factor(graft_fail_5yr,
+                                              levels = c("censor", "graft failure", "death"))) %>% 
+                      filter(graft_fail_days_since_ce_5yr_censored >= 0) %>%
+                      mutate(survival_5yr = ifelse(survival_5yr == 1, "No", "Yes")), 
+        overall = FALSE, 
+        caption = "Graft failure at 5-yr following transplant")
+```
+
+- Competing risk analysis adjusted for: 
+  - pre-transplant most recent LIC levels: low(<5 mg Fe/g dry wt), or high (>5 mg Fe/g dry wt)
+  - age at transplant: continuous 
+  - gender: female (ref) or male
+  - match status: Allogeneic: Cord Blood, matched related (ref), matched unrelated/mismatched related/mismatched unrelated, autologous/genetherapy, and Unknown
+  - has busulfan: yes or no
+  - Outcomes: graft failure or death without graft failure 
+- All patients with cord blood transplant survived (n = `r cord_blood_ct`). 
+- n = `r unknown_ct` patients with unknown match status
+
+- Composite outcome: event-free survival: death/graft failure (whichever is first) 
+
+```{r graft_fail_pre_LIC, echo= FALSE, message=FALSE, fig.width = 9, fig.height = 6}
+pre_LIC_cox_2 <- pre_LIC_cox %>% 
+                      filter(!(transplant_type_combined %in% c("Allogeneic: Cord Blood", "Unknown"))) %>%
+                      # filter(transplant_type_combined != "autologous/genetherapy") %>% 
+                      filter(!is.na(graft_fail_5yr)) %>% 
+                      mutate(graft_fail_5yr = recode(graft_fail_5yr, "0" = "censor", "1" = "graft failure", "2" = "death")) %>%
+                      mutate(graft_fail_5yr = factor(graft_fail_5yr,
+                                              levels = c("censor", "graft failure", "death"))) %>% 
+                      filter(graft_fail_days_since_ce_5yr_censored >= 0) %>%
+                      mutate(transplant_type_combined = relevel(factor(transplant_type_combined), ref = "matched related"))
+
+# 0 is censored/survived, 1 is death
+# exclude match_status and graft_manip
+compRisk_LIC_gf <- coxph(Surv(graft_fail_days_since_ce_5yr_censored/365.25, graft_fail_5yr) ~ LIC_level_3_binary + age_at_ce + gender + transplant_type_combined + has_busulfan, 
+                data = pre_LIC_cox_2, 
+                id = record_id)
+
+# visualiza the impact on iron levels
+# LIC_levels_df <- with(pre_ferritin_cox_2,
+#                data.frame(LIC_level_3_binary = c("low", "high"), 
+#                           age_at_ce = rep(mean(age_at_ce, na.rm = TRUE), 2),
+#                           gender = rep("Female", 2),
+#                           transplant_type_combined = rep("matched unrelated",2),
+#                           has_busulfan  = rep("No", 2)))
+# fit <- survfit(res.cox, newdata = LIC_levels_df)
+# ggsurvplot(fit, data = LIC_levels_df, 
+#                   conf.int = FALSE, ggtheme = theme_minimal(),
+#                   legend.labs = c("Low", "High"),
+#                   legend.title = "Pre-transplant LIC levels", 
+#                   xlab = "Years", ylab = "Graft failure free probability",
+#                   xlim = c(0, 5), ylim = c(0.5, 1.0)) 
+#                   #risk.table = TRUE, risk.table.title = "test")
+
+```
+
+- The effects using pre-transplant LIC are similar to that of ferritin, having a matched unrelated/mismatched unrelated/mismatched related transplant increased the risk of graft failure by almost 4 folds comparing to having a matched related transplant. Gender is another significant factor, risk of graft failure in male patients is almost 3 times higher than females. 
+
+- For death without graft failure, none of the effect is significant (no patients receiving augologous/gene therapy transplant dies without graft failure; thus, this coefficient could be ignored) 
+
+- In the table below: 1:2 represents transition to Graft failure and 1:3 represents transition to death without graft failure
+- Nora, patients with high LIC level are less likely to get graft failure, is it because these patients are more likely to receive bulsufan? 
+
+```{r graft_fail_pre_LIC_sum, echo= FALSE, message=FALSE}
+# summary(res.cox)
+cox_sum(compRisk_LIC_gf) %>% prettify_kable()
+```
+
+# Bacteremia
+## Bacteremia stratified by <span style="color:red">pre-transplant ferritin levels</span>
+## Bacteremia stratified by <span style="color:red">pre-transplant LIC levels</span>
 
 # Address missing data
 
 # Sensitivity analysis
+## Overall survival: Subgroup analysis for pre-transplant LIC binary classification
+### sickle cell disease --- Overall survival: Subgroup analysis for pre-transplant LIC binary levels
+
+```{r pre_LIC_binary_OS_disease_subgroup_scd}
+table1(~age_at_ce + gender + transplant_type_combined + LIC_level_3_binary + has_busulfan| survival_5yr, 
+        data = pre_LIC_cox %>% mutate(survival_5yr = ifelse(survival_5yr ==1, "Dead", "Survived")) %>%
+                filter(scd_type == "sickle cell disease"), 
+        overall = FALSE, 
+        caption = "Overall survival at 5-yr following transplant --- sickle cell disease")     
+
+# pre_LIC_os_btm <- pre_LIC_cox %>%
+#     filter(!(transplant_type_combined %in% c("mismatched related", "mismatched unrelated", "autologous/genetherapy"))) %>%
+#     cox_fit_plot(time_var = "survival_time_5yr_censored", 
+#                 status_var = "survival_5yr", 
+#                 covariates = c("LIC_level_3_binary", "age_at_ce", "gender", "has_busulfan", "transplant_type_combined"),
+#                 iron_level_var = "LIC_level_3_binary", 
+#                 plot_labels = c("Pre-transplant LIC binary levels --- beta thalassemia major", "Overall survival probability"),
+#                 sub_group = "beta thalassemia major")
+
+# print(pre_LIC_os_btm$p)
+# cox_sum(pre_LIC_os_btm$fit) %>% prettify_kable()
+```
+
+### sickle cell disease --- Overall survival: Subgroup analysis for pre-transplant LIC binary levels
+
+```{r pre_LIC_binary_OS_disease_subgroup_aa}
+table1(~age_at_ce + gender + transplant_type_combined + LIC_level_3_binary + has_busulfan| survival_5yr, 
+        data = pre_LIC_cox %>% mutate(survival_5yr = ifelse(survival_5yr ==1, "Dead", "Survived")) %>%
+                filter(scd_type == "aplastic anemia"), 
+        overall = FALSE, 
+        caption = "Overall survival at 5-yr following transplant --- aplastic anemia")     
+
+pre_LIC_os_aa <- pre_LIC_cox %>%
+    filter(!(transplant_type_combined %in% c("Unknown", "Haploidentical", "autologous/genetherapy", "Allogeneic: Cord Blood"))) %>%
+    cox_fit_plot(time_var = "survival_time_5yr_censored", 
+                status_var = "survival_5yr", 
+                covariates = c("LIC_level_3_binary", "age_at_ce", "gender", "has_busulfan", "transplant_type_combined"),
+                iron_level_var = "LIC_level_3_binary", 
+                plot_labels = c("Pre-transplant LIC binary levels --- aplastic anemia", "Overall survival probability"),
+                sub_group = "aplastic anemia")
+
+print(pre_LIC_os_aa$p)
+cox_sum(pre_LIC_os_aa$fit) %>% prettify_kable()
+```
+
+### beta thalassemia major  --- Overall survival: Subgroup analysis for pre-transplant LIC binary levels
+
+```{r pre_LIC_binary_OS_disease_subgroup_btm}
+table1(~age_at_ce + gender + transplant_type_combined + LIC_level_3_binary + has_busulfan| survival_5yr, 
+        data = pre_LIC_cox %>% mutate(survival_5yr = ifelse(survival_5yr ==1, "Dead", "Survived")) %>%
+                filter(scd_type == "beta thalassemia major"), 
+        overall = FALSE, 
+        caption = "Overall survival at 5-yr following transplant --- beta thalassemia major")     
+
+pre_LIC_os_btm <- pre_LIC_cox %>%
+    filter(!(transplant_type_combined %in% c("mismatched related", "mismatched unrelated", "autologous/genetherapy"))) %>%
+    cox_fit_plot(time_var = "survival_time_5yr_censored", 
+                status_var = "survival_5yr", 
+                covariates = c("LIC_level_3_binary", "age_at_ce", "gender", "has_busulfan", "transplant_type_combined"),
+                iron_level_var = "LIC_level_3_binary", 
+                plot_labels = c("Pre-transplant LIC binary levels --- beta thalassemia major", "Overall survival probability"),
+                sub_group = "beta thalassemia major")
+
+print(pre_LIC_os_btm$p)
+cox_sum(pre_LIC_os_btm$fit) %>% prettify_kable()
+```
+
+## Overall survival: Subgroup analysis for pre-transplant ferritin levels
+### aplastic anemia  --- Overall survival: Subgroup analysis for pre-transplant ferritin levels
+```{r pre_ferritin_OS_disease_subgroup_aa}
+table1(~age_at_ce + gender + transplant_type_combined + ferritin_pre + has_busulfan| survival_5yr, 
+        data = pre_ferritin_cox %>% mutate(survival_5yr = ifelse(survival_5yr ==1, "Dead", "Survived")) %>%
+                filter(scd_type == "aplastic anemia"), 
+        overall = FALSE, 
+        caption = "Overall survival at 5-yr following transplant --- aplastic anemia")                          
+
+pre_ferritin_os_aa <- pre_ferritin_cox %>%
+    filter(!(transplant_type_combined %in% c("Unknown", "autologous/genetherapy"))) %>%
+    cox_fit_plot(time_var = "survival_time_5yr_censored", 
+                status_var = "survival_5yr", 
+                covariates = c("ferritin_pre", "age_at_ce", "gender", "transplant_type_combined", "has_busulfan"),
+                iron_level_var = "ferritin_pre", 
+                plot_labels = c("Pre-transplant ferritin levels --- aplastic anemia", "Overall survival probability"),
+                sub_group = "aplastic anemia")
+print(pre_ferritin_os_aa$p)
+cox_sum(pre_ferritin_os_aa$fit) %>% prettify_kable()
+```
+
+### sickle cell disease  --- Overall survival: Subgroup analysis for pre-transplant ferritin levels
+```{r pre_ferritin_OS_disease_subgroup_scd}
+table1(~age_at_ce + gender + transplant_type_combined + ferritin_pre + has_busulfan| survival_5yr, 
+        data = pre_ferritin_cox %>% mutate(survival_5yr = ifelse(survival_5yr ==1, "Dead", "Survived")) %>%
+                filter(scd_type == "sickle cell disease"), 
+        overall = FALSE, 
+        caption = "Overall survival at 5-yr following transplant --- sickle cell disease")                          
+
+pre_ferritin_os_scd <- pre_ferritin_cox %>%
+    filter((transplant_type_combined %in% c("matched related", "mismatched unrelated", "matched unrelated"))) %>%
+    cox_fit_plot(time_var = "survival_time_5yr_censored", 
+                status_var = "survival_5yr", 
+                covariates = c("ferritin_pre", "age_at_ce", "gender", "has_busulfan","transplant_type_combined"),
+                iron_level_var = "ferritin_pre", 
+                plot_labels = c("Pre-transplant ferritin levels --- sickle cell disease", "Overall survival probability"),
+                sub_group = "sickle cell disease")
+
+print(pre_ferritin_os_scd$p)
+cox_sum(pre_ferritin_os_scd$fit) %>% prettify_kable()
+```
+
+### beta thalassemia major  --- Overall survival: Subgroup analysis for pre-transplant ferritin levels
+```{r pre_ferritin_OS_disease_subgroup_btm}
+table1(~age_at_ce + gender + transplant_type_combined + ferritin_pre + has_busulfan| survival_5yr, 
+        data = pre_ferritin_cox %>% mutate(survival_5yr = ifelse(survival_5yr ==1, "Dead", "Survived")) %>%
+                filter(scd_type == "beta thalassemia major"), 
+        overall = FALSE, 
+        caption = "Overall survival at 5-yr following transplant --- beta thalassemia major")     
+
+pre_ferritin_os_btm <- pre_ferritin_cox %>%
+    filter(!(transplant_type_combined %in% c("mismatched related", "mismatched unrelated", "autologous/genetherapy"))) %>%
+    cox_fit_plot(time_var = "survival_time_5yr_censored", 
+                status_var = "survival_5yr", 
+                covariates = c("ferritin_pre", "age_at_ce", "gender", "has_busulfan", "transplant_type_combined"),
+                iron_level_var = "ferritin_pre", 
+                plot_labels = c("Pre-transplant ferritin levels --- beta thalassemia major", "Overall survival probability"),
+                sub_group = "beta thalassemia major")
+
+print(pre_ferritin_os_btm$p)
+cox_sum(pre_ferritin_os_btm$fit) %>% prettify_kable()
+
+# pre_ferritin_cox_1 %>% filter(scd_type == "sickle cell disease") %>%
+#       group_by(transplant_type_combined, survival_5yr) %>% summarise(n = n_distinct(record_id))
+```
+
+
 - Aim 2a and 2b: Subgroup analyses by disease, specifically sickle cell disease 
 - Aim 2a: VOD- stratify outcome by busulfan 
+- Different cut-off thresholds for LIC and ferritin
+- Average of the latest LIC, show the change in their LIC levels
 

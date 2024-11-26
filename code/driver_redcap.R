@@ -8,11 +8,11 @@
     # Stanford always have some weird data
     # 08_0017 has an LIC date but no LIC_raw value
     # 08_0019_cr measurement on 2019-06-06 R2* require no conversion
-    test <- read.csv("redcap/IronOverloadChartRev_DATA_2024-08-08_1508.csv")
+    test <- read.csv("redcap/IronOverloadChartRev_DATA_2024-11-01_1059.csv")
     test %>% filter(redcap_data_access_group == "cchmc") %>% select(record_id, starts_with("iron_val_")) %>% view()
 
     # get the most recent redcap data, filter out old patient ids, extract completed records
-    cr_data <- get_redcap_data(redcap_filename = "redcap/IronOverloadChartRev_DATA_2024-08-08_1508.csv")
+    cr_data <- get_redcap_data(redcap_filename = "redcap/IronOverloadChartRev_DATA_2024-11-08_1206.csv")
     cr_data %>% view()
     
     # number of completed chart reviews n = 600 
@@ -38,6 +38,7 @@
                 summarise(n = n_distinct(record_id)) %>%  
                 ungroup() %>% filter(LIC_est_method == "R2*") %>% #is.na(LIC_other_unit) | is.na(LIC_est_method)
                 view()
+
     # T2* from stanford: 
     # T2* from colorado: no conversion needed
     # other institutions: ask Nora
@@ -54,11 +55,27 @@
                                         grepl("ms", LIC_other_unit, ignore.case = TRUE) ~ TRUE, 
                                         is.na(LIC_other_unit) ~ NA,
                                         TRUE ~ FALSE),
+                        is_Hz = case_when(record_id == "04_0001_cr" & LIC_date == as.Date("2007-07-19") ~ TRUE,
+                                          record_id == "04_0001_cr" & LIC_date == as.Date("2017-03-23") & LIC_est_method == "R2" ~ TRUE, 
+                                          record_id == "04_0002_cr" & LIC_date == as.Date("2007-09-04") ~ TRUE, 
+                                          record_id == "04_0002_cr" & LIC_date == as.Date("2011-12-13") & LIC_est_method == "R2" ~ TRUE, 
+                                          record_id == "04_0003_cr" & LIC_date == as.Date("2009-08-07") ~ TRUE, 
+                                          record_id == "04_0004_cr" & LIC_date == as.Date("2007-08-21") ~ TRUE, 
+                                          record_id == "04_0005_cr" & LIC_date == as.Date("2007-08-07") ~ TRUE, 
+                                          record_id == "04_0008_cr" & LIC_date == as.Date("2009-09-02") ~ TRUE, 
+                                          record_id == "04_0009_cr" & LIC_date == as.Date("2007-07-24") ~ TRUE, 
+                                          record_id == "04_0013_cr" & LIC_date == as.Date("2009-07-22") & LIC_est_method == "R2*"~ TRUE, 
+                                          record_id == "04_0014_cr" & LIC_date == as.Date("2009-08-07") & LIC_est_method == "R2*"~ TRUE, 
+                                          record_id == "04_0021_cr" & LIC_date == as.Date("2019-03-31") & LIC_est_method == "R2"~ TRUE, 
+                                          record_id == "04_0024_cr" & LIC_date == as.Date("2009-09-04") ~ TRUE, 
+                                          record_id == "04_0044_cr" & LIC_date == as.Date("2016-11-29.0254*33") & LIC_est_method == "R2"~ TRUE, 
+                                          TRUE ~ FALSE),                                
                         LIC = case_when(record_id == "08_0019_cr" & LIC_est_method == "R2*" ~ LIC_raw,
                                         site %in% c("chop", "colorado") ~ LIC_raw, # no conversion needed for these sites 
                                         !is_ms | is.na(is_ms) ~ LIC_raw, 
                                         is_ms ~ 1000/LIC_raw*0.0254 + 0.202, 
-                                        TRUE ~ NA_real_),
+                                        TRUE ~ NA),
+                        LIC = ifelse(is_Hz, LIC_raw*0.0254 + 0.202, LIC), 
                         LIC_type = case_when(LIC_date >= transplant_date ~ "post-transplant", 
                                              LIC_date < transplant_date ~ "pre-transplant", 
                                              TRUE ~ NA)) 
@@ -68,8 +85,39 @@
                 arrange(site, record_id, LIC_date, LIC_est_method, is_ms) %>% 
                 view()
                 # group_by(LIC_other_unit, LIC_est_method, is_ms) %>% summarise(n = n_distinct(record_id)) %>% view()
+    cr_data %>% filter(eligibility == "Yes", site == "lurie", LIC_est_method != "R2", !(LIC_other_unit %in% c("NA", "N/A", "na", "n/a"))) %>% distinct(record_id) %>% view()
+
+    # check for lurie value
+    lurie <- cr_data %>% filter(eligibility == "Yes") %>%
+                filter(site == "lurie") %>%
+                filter(!is.na(LIC_date)) 
+                # select(record_id, LIC_date, LIC_raw, LIC_est_method, is_ms, is_Hz, LIC, LIC_type, LIC_other_unit) 
+    
+    # output Lurie data for Nora
+    lurie %>% select(record_id, LIC_date, LIC_raw, LIC_est_method, is_ms, is_Hz, LIC, LIC_type, LIC_other_unit)  %>%
+                arrange(record_id, LIC_date) %>% output_tbl(name = "lurie_LIC_data", file = TRUE, local = TRUE)
+
+    # for dates with multiple LIC values, we will use the R2 values, aka exclude R2* values
+    # for dates with multiple R2 values, we will use average values            
+    lurie_multi_per_day <- lurie %>% group_by(record_id, LIC_date) %>% 
+                summarise(n = n()) %>% ungroup() %>% filter(n >= 2) %>% 
+                left_join(lurie, by = c("record_id", "LIC_date")) %>% 
+                filter(LIC_est_method == "R2*") #%>% 
+                # group_by(record_id, LIC_date, LIC_est_method ) %>% 
+                # summarise(LIC = mean(LIC, na.rm = TRUE)) %>% ungroup() 
+    lurie <- lurie %>% anti_join(lurie_multi_per_day, by = c("record_id", "LIC_date", "LIC_est_method"))        
+
+     cr_data <- cr_data %>% anti_join(lurie, by = c("record_id", "LIC_date")) %>%
+                union(lurie)
 
     # write cr data to a table
+    # patients with match status that were not included in the study
+
+    cr_data <- cr_data %>% mutate(match_status = case_when(record_id %in% c("01_0094_cr", "01_0046_cr", "01_0003_cr", "01_0138_cr", "01_0110_cr", "01_0124_cr", "01_0008_cr", "01_0034_cr") ~ "8/8", 
+                                                           record_id %in% c("01_0147_cr", "01_0050_cr", "01_0023_cr") ~ "7/8", 
+                                                           record_id == "01_0188_cr" ~ "5/8", 
+                                                           record_id == "01_0106_cr" ~ "8/10", 
+                                                           TRUE ~ match_status))                                                             
     cr_data %>% output_tbl(name = "cr_data")
 
     # completion by site

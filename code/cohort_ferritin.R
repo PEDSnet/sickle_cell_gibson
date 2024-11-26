@@ -4,34 +4,34 @@ ferritin_classification <- function(cohort,
                                 cutoff_days = 365.25,
                                 slice_by = "most_recent") {
 
-        cohort <- cohort %>% collect() %>% group_by(person_id) %>%
+        cohort <- cohort %>% collect() %>% group_by(person_id, transplant_date) %>%
                         mutate(ferritin_days_since_transplant = as.numeric(difftime(ferritin_date, transplant_date, units = "days"))) %>%
                         filter(abs(ferritin_days_since_transplant) <= cutoff_days) %>% ungroup()
 
         if (ferritin_type == "pre") { # most recent values 
                 cohort <- cohort %>% filter(ferritin_days_since_transplant <= 0) %>% 
-                        group_by(person_id) %>% 
+                        group_by(person_id, transplant_date) %>% 
                         slice_min(as.numeric(difftime(transplant_date, ferritin_date, units = "days")), n = no_ferritin, with_ties = keep_tie) %>% 
                         summarise(ferritin = mean(ferritin, na.rm = TRUE),
                         ferritin_days_since_transplant = mean(ferritin_days_since_transplant, na.rm = TRUE)) %>% ungroup() %>%
                         mutate(ferritin_type = "pre")                                        
         } else if (ferritin_type == "post") { # most recent values 
                 cohort <- cohort %>% filter(ferritin_days_since_transplant > 0) %>% 
-                        group_by(person_id) %>% 
+                        group_by(person_id, transplant_date) %>% 
                         slice_min(ferritin_days_since_transplant, n = no_ferritin, with_ties = keep_tie) %>% 
                         summarise(ferritin = mean(ferritin, na.rm = TRUE), 
                                  ferritin_days_since_transplant = mean(ferritin_days_since_transplant, na.rm = TRUE)) %>% 
                         ungroup() %>% mutate(ferritin_type = "post")
         } else if( ferritin_type == "pre_max") {
                 cohort <- cohort %>% filter(ferritin_days_since_transplant <= 0) %>% 
-                        group_by(person_id) %>% 
+                        group_by(person_id, transplant_date) %>% 
                         slice_max(ferritin, n = no_ferritin, with_ties = keep_tie) %>% 
                         summarise(ferritin = mean(ferritin, na.rm = TRUE),
                         ferritin_days_since_transplant = mean(ferritin_days_since_transplant, na.rm = TRUE)) %>% 
                         ungroup() %>% mutate(ferritin_type = "pre_max")
         } else if( ferritin_type == "post_max") {
                 cohort <- cohort %>% filter(ferritin_days_since_transplant > 0) %>% 
-                        group_by(person_id) %>% 
+                        group_by(person_id, transplant_date) %>% 
                         slice_max(ferritin, n = no_ferritin, with_ties = keep_tie) %>% 
                         summarise(ferritin = mean(ferritin, na.rm = TRUE),
                         ferritin_days_since_transplant = mean(ferritin_days_since_transplant, na.rm = TRUE)) %>% 

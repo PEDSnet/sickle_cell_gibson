@@ -29,16 +29,18 @@ find_conditions <- function(dx_codeset){
 }
 
 # could be used for mri, phleb
-find_procedures <- function(procedure_codeset_name){
+find_procedures <- function(cohort, 
+                            procedure_codeset_name){
     procedure_id <- load_codeset(procedure_codeset_name)
-    tbl <- cdm_tbl("procedure_occurrence") %>% inner_join(procedure_id, by = c("procedure_concept_id" = "concept_id")) %>%
-                select(procedure_occurrence_id, 
-                        person_id, 
-                        procedure_concept_id, 
-                        procedure_concept_name, 
-                        procedure_date, 
-                        visit_occurrence_id, 
-                        site)
+    tbl <- cohort %>% left_join(cdm_tbl("procedure_occurrence"), by = "person_id") %>% 
+                inner_join(procedure_id, by = c("procedure_concept_id" = "concept_id")) #%>%
+                # select(procedure_occurrence_id, 
+                #         person_id, 
+                #         procedure_concept_id, 
+                #         procedure_concept_name, 
+                #         procedure_date, 
+                #         visit_occurrence_id, 
+                #         site)
     return(tbl)
 }
 
@@ -135,19 +137,21 @@ find_phleb <- function(){
     return(tbl)
 }
 
-find_drugs <- function(dx_codeset){
-    tbl <- cdm_tbl("drug_exposure") %>% inner_join(dx_codeset, by = c("drug_concept_id" = "concept_id")) %>%
-                select(drug_exposure_id, 
-                        person_id, 
-                        drug_concept_id, 
-                        drug_concept_name, 
-                        drug_exposure_start_date, 
-                        frequency,
-                        dose_unit_concept_name,
-                        effective_drug_dose,
-                        quantity,
-                        days_supply,
-                        drug_type = type)
+find_drugs <- function(cohort, dx_codeset){
+    # dx_codeset <- load_codeset(dx_codeset)
+    tbl <- cohort %>% left_join(cdm_tbl("drug_exposure"), by = "person_id") %>% 
+                inner_join(dx_codeset, by = c("drug_concept_id" = "concept_id")) #%>%
+                # select(drug_exposure_id, 
+                #         person_id, 
+                #         drug_concept_id, 
+                #         drug_concept_name, 
+                #         drug_exposure_start_date, 
+                #         frequency,
+                #         dose_unit_concept_name,
+                #         effective_drug_dose,
+                #         quantity,
+                #         days_supply,
+                #         drug_type = type)
     return(tbl)
 }
 
