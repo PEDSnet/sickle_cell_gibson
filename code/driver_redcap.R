@@ -12,7 +12,7 @@
     test %>% filter(redcap_data_access_group == "cchmc") %>% select(record_id, starts_with("iron_val_")) %>% view()
 
     # get the most recent redcap data, filter out old patient ids, extract completed records
-    cr_data <- get_redcap_data(redcap_filename = "redcap/IronOverloadChartRev_DATA_2024-11-08_1206.csv")
+    cr_data <- get_redcap_data(redcap_filename = "redcap/IronOverloadChartRev_DATA_2024-11-26_2219.csv")
     cr_data %>% view()
     
     # number of completed chart reviews n = 600 

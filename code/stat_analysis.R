@@ -41,7 +41,7 @@ cohort_covars <- results_tbl("analytics_dataset") %>% collect() %>%
                                         IgM_reconstitute_6mon ~ "3-6 months",
                                         IgM_reconstitute_3mon ~ "6-9 months",
                                         IgM_reconstitute_12mon ~ "9-12 months", TRUE ~ "Never/after 12 months")) %>%
-         mutate(across(ends_with("reconstitution"), ~factor(.x, levels = c("0-3 months", "3-6 months", "6-9 months", "9-12 months", "Never/after 12 months")))) %>%
+         mutate(across(ends_with("reconstitution"), ~factor(.x, levels = c("0-3 months", "3-6 months", "6-9 months", "9-12 months", "Never/after 12 months")))) %>% 
          mutate(vod_subgroup = if_else(vod, scd_type, "No VOD")) %>% 
          mutate(vod_subgroup = factor(vod_subgroup, levels = c("beta thalassemia major", "sickle cell disease", "No VOD")))%>%
          mutate(busulfan_and_vod = case_when(has_busulfan & vod ~ "busulfan & VOD",
@@ -66,25 +66,25 @@ cohort_covars <- cohort_covars %>%
                                                TRUE ~ NA_real_),
          graft_fail_days_since_ce_5yr_censored = case_when(graft_fail_days_since_ce > 365.25*5 ~ 365.25*5, #censored at 5 years
                                                            graft_fail_days_since_ce <= 365.25*5 ~ graft_fail_days_since_ce, #graft failure
-                                                           death_days_since_ce <= 365.25*3 ~ death_days_since_ce, #death: competing event
+                                                           death_days_since_ce <= 365.25*5 ~ death_days_since_ce, #death: competing event
                                                            last_in_person_visit_since_ce <= 365.25*5 & is.na(graft_fail_days_since_ce) ~ last_in_person_visit_since_ce, #censored at last visit
                                                            last_in_person_visit_since_ce > 365.25*5 & is.na(graft_fail_days_since_ce) ~ 365.25*5, #censored at 5 years follow-up
                                                             TRUE ~ NA),
          # graft failure is a competing event: 0: censored, 1: graft failure, 2:death                                       
          graft_fail_5yr = case_when(graft_fail_days_since_ce <= 365.25*5 ~ "1",
-                                    death_days_since_ce <= 365.25*3 ~ "2", 
+                                    death_days_since_ce <= 365.25*5 ~ "2", 
                                     graft_fail_days_since_ce > 365.25*5 | !is.na(last_in_person_visit_since_ce) ~ "0",
                                     TRUE ~ NA))
 
 cohort_covars <- cohort_covars %>% #mutate(ferritin_pre = factor(ferritin_pre, levels = c("low", "moderate", "high")),
          #ferritin_pre_max = factor(ferritin_pre_max, levels = c("low", "moderate", "high"))) %>%
-  mutate(bacteremia_time_5yr_censored = case_when(bacteremia_days_since_ce > 365.25*5 ~ 365.25*5, 
-                                                  bacteremia_days_since_ce >= 0 & bacteremia_days_since_ce <= 365.25*5 ~ bacteremia_days_since_ce,death_days_since_ce <= 365.25*5 ~ death_days_since_ce, #if die before 5 years, mark as censored 
-                                                  is.na(bacteremia_days_since_ce) & !is.na(last_in_person_visit_since_ce) ~ pmin(last_in_person_visit_since_ce, 365.25*5, na.rm = TRUE),
+  mutate(bacteremia_time_1yr_censored = case_when(bacteremia_days_since_ce > 365.25 ~ 365.25, 
+                                                  bacteremia_days_since_ce >= 0 & bacteremia_days_since_ce <= 365.25 ~ bacteremia_days_since_ce,death_days_since_ce <= 365.25 ~ death_days_since_ce, #if die before 5 years, mark as censored 
+                                                  is.na(bacteremia_days_since_ce) & !is.na(last_in_person_visit_since_ce) ~ pmin(last_in_person_visit_since_ce, 365.25, na.rm = TRUE),
                                                TRUE ~ NA_real_)) %>%
-  mutate(bacteremia_5yr = case_when(is.na(bacteremia_days_since_ce) & bacteremia_time_5yr_censored < 365.25*5 ~ 0, 
-                                bacteremia_time_5yr_censored >= 0 & bacteremia_time_5yr_censored < 365.25*5 & !is.na(bacteremia_days_since_ce)~ 1, 
-                                bacteremia_time_5yr_censored >= (365.25 * 5) ~0)) %>%
+  mutate(bacteremia_1yr = case_when(is.na(bacteremia_days_since_ce) & bacteremia_time_1yr_censored < 365.25 ~ 0, 
+                                bacteremia_time_1yr_censored >= 0 & bacteremia_time_1yr_censored < 365.25 & !is.na(bacteremia_days_since_ce)~ 1, 
+                                bacteremia_time_1yr_censored >= (365.25) ~0)) %>%
   mutate(graft_manip = if_else(is.na(graft_manip), "Unknown", graft_manip)) %>%
   mutate(disease_relapse = if_else(is.na(graft_fail_date), "No", "Yes")) 
 
@@ -226,3 +226,191 @@ cohort_covars %>% output_tbl("survival_analysis_dataset")
 #             mutate(duration = end_date - start_date) %>% view()
 
 
+# graft failure competing risk model
+pre_ferritin_cox_2 <- pre_ferritin_cox %>% 
+                          filter(transplant_type_combined != "Unknown") %>% 
+                          # filter(transplant_type_combined != "autologous/genetherapy") %>% 
+                          filter(!is.na(graft_fail_5yr)) %>% 
+                          # mutate(graft_fail_5yr = recode(graft_fail_5yr, "0" = "event-free", "1" = "graft failure", "2" = "death")) %>%
+                          # mutate(graft_fail_5yr = factor(graft_fail_5yr,
+                                                  # levels = c("event-free", "graft failure", "death"))) %>% 
+                          filter(graft_fail_days_since_ce_5yr_censored >= 0) %>%
+                          mutate(transplant_type_combined = relevel(factor(transplant_type_combined), ref = "matched related"))
+
+# Prepare transition matrix
+tmat <- trans.comprisk(2, names = c("event-free", "graft failure", "death"))
+
+# Run msprep
+pre_ferritin_cox_2$graft_fail <- as.numeric(pre_ferritin_cox_2$graft_fail_5yr == 1)
+pre_ferritin_cox_2$death <- as.numeric(pre_ferritin_cox_2$graft_fail_5yr == 2)
+
+pre_ferritin_cox_2_long <- msprep(
+  time = c(NA, "graft_fail_days_since_ce_5yr_censored", "graft_fail_days_since_ce_5yr_censored"), 
+  status = c(NA, "graft_fail", "death"), 
+  data = pre_ferritin_cox_2, 
+  keep = c("scd_type", "has_busulfan", "transplant_type_combined", "age_at_ce", "gender", "ferritin_pre"), 
+  trans = tmat)
+
+events(pre_ferritin_cox_2_long)
+
+pre_ferritin_cox_2_long %>% view()
+
+# Run cox model
+pre_ferritin_cox_2_expanded <- expand.covs(pre_ferritin_cox_2_long, "ferritin_pre")
+colnames(pre_ferritin_cox_2_expanded)
+pre_ferritin_cox_2_expanded %>% view()
+c1 <- coxph(Surv(time, status) ~ ferritin_premoderate.1 + ferritin_prehigh.2 +
+                                  ferritin_prehigh.1 + ferritin_prehigh.2 + 
+                                  strata(trans),
+            data = pre_ferritin_cox_2_expanded)
+
+# Visualising cumulative baseline hazards using plot.msfit()
+# Data to predict
+ferritin_low <- data.frame(
+  ferritin_premoderate.1 = c(0, 0, 0, 0),
+  ferritin_premoderate.2 = c(0, 0, 0, 0),
+  ferritin_prehigh.1 = c(0, 0, 0, 0),
+  ferritin_prehigh.2 = c(0, 0, 0, 0),
+  trans = c(1, 2), 
+  strata = c(1, 2)
+)
+
+# Make msfit object
+msf.ferritin_low <- msfit(
+  object = c1, 
+  newdata = ferritin_low, 
+  trans = tmat)
+
+# Plot cumulative baseline hazards
+# different line colors for different strata
+plot(msf.ferritin_low, 
+    type = "single",
+    xlim = c(0, 5*365.25), 
+    col = c("red", "blue"), 
+    lty = c("dashed", "solid"), 
+    legend.pos = "top",
+    lwd = 2,
+    use.ggplot = TRUE,
+    # conf.type = "log", 
+  # conf.int = 0.95
+  ) + # Add title and center
+  ggtitle("Cumulative baseline hazards") +
+  theme(plot.title = element_text(hjust = 0.5))
+
+# Plot cumulative baseline hazards using facet wrap for event types
+
+plot(msf.ferritin_low, 
+    xlim = c(0, 5*365.25), 
+    col = c("red", "blue"), 
+    lty = c("dashed", "solid"), 
+    legend.pos = "top",
+    lwd = 2,
+    use.ggplot = TRUE,
+    type = "separate", #for 2 boxes
+    scale_type = "fixed"
+
+  ) + # Add title and center
+  ggtitle("Cumulative baseline hazards") +
+  theme(plot.title = element_text(hjust = 0.5))
+
+# Filled/stacked plots
+# patient-specific transition probabilities using probtrans(). 
+# we would like to predict from the beginning of follow-up (predt = 0).
+pt.ferritin <- probtrans(msf.ferritin_low, predt = 0)
+
+# Example predict at different times
+summary(pt.ferritin, times = c(1, 5, 10))
+
+# stacked plot 
+plot(pt.ferritin, from = 1)
+
+# reordering the event types to have 1 competing event at the bottom and 1 at the top
+
+plot(pt.ferritin, 
+    use.ggplot = TRUE, # return a ggplot object and put legend outside
+    ord = c(2, 1, 3))
+
+# each event type in one subplot
+par(mfrow = c(1, 3))
+plot(pt.ferritin, 
+    type = "separate",
+    conf.int = 0.95, # 95% level
+  conf.type = "log")
+
+# comparing different ferritin levels
+# 1. Prepare patient data 
+ferritin_low <- data.frame(
+  ferritin_premoderate.1 = c(0, 0, 0, 0),
+  ferritin_premoderate.2 = c(0, 0, 0, 0),
+  ferritin_prehigh.1 = c(0, 0, 0, 0),
+  ferritin_prehigh.2 = c(0, 0, 0, 0),
+  trans = c(1, 2), 
+  strata = c(1, 2)
+)
+
+ferritin_med <- data.frame(
+  ferritin_premoderate.1 = c(1, 0, 0, 0),
+  ferritin_premoderate.2 = c(0, 1, 0, 0),
+  ferritin_prehigh.1 = c(0, 0, 0, 0),
+  ferritin_prehigh.2 = c(0, 0, 0, 0),
+  trans = c(1, 2), 
+  strata = c(1, 2)
+)
+
+ferritin_high <- data.frame(
+  ferritin_premoderate.1 = c(0, 0, 0, 0),
+  ferritin_premoderate.2 = c(0, 0, 0, 0),
+  ferritin_prehigh.1 = c(1, 0, 0, 0),
+  ferritin_prehigh.2 = c(0, 1, 0, 0),
+  trans = c(1, 2), 
+  strata = c(1, 2)
+)
+
+# 2. Make msfit objects
+msf.low <- msfit(c1, ferritin_low, trans = tmat)
+msf.med <- msfit(c1, ferritin_med, trans = tmat)
+msf.high <- msfit(c1, ferritin_high, trans = tmat)
+
+
+# 3. Make probtrans objects
+pt.low <- probtrans(msf.low, predt = 0)
+pt.med <- probtrans(msf.med, predt = 0)
+pt.high <- probtrans(msf.high, predt = 0)
+
+
+vis.multiple.pt(
+  x = list(pt.low, pt.med, pt.high), 
+  from = 1,
+  to = 2, 
+  # conf.type = "log",
+  cols = c("red", "green", "blue"),
+  labels = c("low", "moderate", "high"),
+  legend.title = "Pre-transplant ferritin",
+  ylab = "Probability of graft failure"
+)
+
+vis.multiple.pt(
+  x = list(pt.low, pt.med, pt.high), 
+  from = 1,
+  to = 3, 
+  # conf.type = "log",
+  cols = c("red", "green", "blue"),
+  labels = c("low", "moderate", "high"),
+  legend.title = "Pre-transplant ferritin",
+  ylab = "Probability of death without graft failure"
+)
+
+## another way
+pt.f_low <- probtrans(msf.f_low, predt = 0)[[1]]
+idx1 <- (pt.f_low$time < 5)
+
+pt.f_moderate <- probtrans(msf.f_moderate, predt = 0)[[1]]
+idx2 <- (pt.f_moderate$time < 5)
+
+plot(c(0, pt.f_low$time[idx1]), c(0, pt.f_low$pstate2[idx1]), type = "s",
+        # type = "single",
+        ylim = c(0, 0.5), xlab = "Years from transplant", ylab = "Probability of graft failure",
+        lwd = 2, use.ggplot = TRUE) 
+lines(c(0, pt.f_moderate$time[idx2]), c(0, pt.f_moderate$pstate2[idx2]), type = "s", 
+      lwd = 2, col = 2)
+title(main = "AIDS")

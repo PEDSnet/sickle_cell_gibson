@@ -21,7 +21,8 @@
                             chart_completion = if_else(is.na(chart_completion), FALSE, chart_completion)) %>%
                     filter((eligibility == "Yes" & chart_completion) | !chart_completion) %>%
                     select(-transplant_date_cr, -transplant_type_cr)
-
+    
+    rslt$study_cohorts %>% view()
     message("Compute platelet engraftment dates")
     rslt$platelet <- find_measurements(cohort = rslt$study_cohorts, 
                                              mx_codeset = load_codeset("platelet_mx")) 
@@ -118,7 +119,11 @@
                     mutate( transfusion_days_since_ce = as.numeric(difftime(transfusion_date, transplant_date, units = "days")))
 
     # get 2nd transplant dates, for patients without chart review data, use EHR data
-    rslt$transplant_px <- rslt$study_cohorts %>% filter(aim_2a_1 | aim_2a_2) %>% left_join(results_tbl("no_multi_transplant_px") %>% 
+    # all chart reviews were done
+    rslt$transplant_px <- rslt$study_cohorts %>% 
+                        # filter(eligibility == "yes") %>%
+                        filter(aim_2a_1 | aim_2a_2) %>% 
+                        left_join(results_tbl("no_multi_transplant_px") %>% 
                         select(person_id, second_transplant_date = transplant_date), by = "person_id") %>% collect_new() %>%
                         filter(second_transplant_date >= transplant_date) %>% 
                         mutate(second_transplant_date = if_else(second_transplant_date == transplant_date, NA, second_transplant_date)) %>%
@@ -158,14 +163,22 @@
                                 cutoff = 20000)
     # Determine number of subsets/pages based on the number of unique groups
     num_plot_per_page <- 10
-    num_pages <- ceiling(rslt$platelet %>% distinct(record_id) %>% nrow() / num_plot_per_page)  # Assuming 8 plots per page
+   # missing platelett data
+    missing_ids <- c("01_0177_cr", "01_0080_cr", "01_0107_cr", "03_0022_cr", "03_0028_cr", 
+                        "04_0037_cr", "05_0007_cr", "05_0008_cr", "05_0004_cr", "05_0025_cr",
+                        "06_0021_cr")
+    num_pages <- ceiling(rslt$platelet %>% distinct(record_id) %>% 
+                        filter(!record_id %in% missing_ids) %>%
+                        nrow() / num_plot_per_page)  # Assuming 8 plots per page
 
     # List to store individual PDF file names
     pdf_files <- list()
 
-    # n = 723 patients
-    record_ids <- rslt$platelet %>% distinct(record_id) %>% arrange(record_id) %>% pull()
-
+    # n = 422 patients
+    record_ids <- rslt$platelet %>% distinct(record_id) %>% 
+                filter(!record_id %in% missing_ids) %>%
+                arrange(record_id) %>% pull()
+   
     # Loop through pages and generate plots
     for (i in 1:num_pages) {
         pdf_files[[i]] <- generate_platelet_plots(data = rslt$platelet,
@@ -183,4 +196,5 @@
 
     rslt$platelet %>% distinct(record_id, person_id, nadir, platelet_engraftment_date) %>% 
         output_tbl(name = "platelet_engraftment_dates", local = TRUE, file = TRUE)
+
 }

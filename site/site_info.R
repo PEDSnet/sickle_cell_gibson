@@ -39,12 +39,24 @@ config('qry_site', 'all_sites')
 #'     * `Sys.setenv(ORA_SDTZ=Sys.timezone())`
 #'
 #' @md
-config('db_src', {
+if(Sys.getenv("db_version") == "5.5"){
+  # the study starts on db5.1
+   config('db_src', {
   require(srcr);
   default <- Sys.getenv('PEDSNET_DB_SRC_CONFIG_BASE', unset = NA)
-  if (is.na(default) || nchar(default) == 0) default <- 'argos_pedsnet_current'
+  if (is.na(default) || nchar(default) == 0) default <- 'argos_pedsnet_5.5'
+  srcr(paths = file.path(base_dir, paste0(default, ".json")))}) 
+} else if (Sys.getenv("db_version") == "5.1"){
+  # the study starts on db5.1
+   config('db_src', {
+  require(srcr);
+  default <- Sys.getenv('PEDSNET_DB_SRC_CONFIG_BASE', unset = NA)
+  if (is.na(default) || nchar(default) == 0) default <- 'argos_pedsnet_5.1'
   srcr(paths = file.path(base_dir, paste0(default, ".json")))
 })
+}
+
+
 
 #' Name of the schema, if any, to be prepended to CDM fact table names.
 #'

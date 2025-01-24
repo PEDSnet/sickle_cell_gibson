@@ -107,16 +107,25 @@
                         arrange(site_id, record_id)
 
         rslt$ANC %>% view()
-        rslt$ANC %>% distinct(person_id) %>% nrow() #659 only aim_2a
+        rslt$ANC %>% distinct(person_id) %>% nrow() #427
 
         # Determine number of subsets/pages based on the number of unique groups
         # Only for aim_2a
         num_plot_per_page <- 10
-        num_pages <- ceiling(rslt$ANC %>% distinct(record_id) %>% nrow() / num_plot_per_page)  
+        # patients with missing data
+        missing_ids <- c("01_0080_cr", "01_0105_cr", "01_0177_cr", "03_0022_cr", "03_0028_cr", 
+                        "03_0088_cr", "04_0037_cr", "05_0001_cr", "05_0008_cr", "05_0043_cr", 
+                        "07_0015_cr", "07_0034_cr", "07_0035_cr", "07_0042_cr", "07_0044_cr", "07_0053_cr",
+                        "07_0058_cr", "07_0061_cr", "07_0087_cr", "08_0052_cr")
+        num_pages <- ceiling(rslt$ANC %>% distinct(record_id) %>% 
+                                filter(!record_id %in% missing_ids) %>%
+                                nrow() / num_plot_per_page)  
 
         # List to store individual PDF file names
         pdf_files <- list()
-        record_ids <- rslt$ANC %>% distinct(record_id) %>% pull()
+        record_ids <- rslt$ANC %>% distinct(record_id) %>% 
+                        filter(!record_id %in% missing_ids) %>%
+                        pull()
         # Loop through pages and generate plots
         # rslt$ANC <- rslt$ANC %>% mutate(anc_engraftment_date = if_else(record_id == "01_0052_cr", NA, anc_engraftment_date),
         #                                 nadir = if_else(record_id == "01_0052_cr", NA, nadir))
@@ -159,7 +168,8 @@
                                                 max_ANC_gaps = 7)
         anc_exception %>% arrange(record_id)                                         
         anc_engraftment %>% filter(record_id %in% wrong_anc_nadir_ids) %>% 
-                        arrange(record_id) 
+                        arrange(record_id) %>%
+                        output_tbl("anc_engraftment_dates", file = TRUE, local = TRUE)
 
 
         

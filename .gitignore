@@ -9,6 +9,7 @@
 **/results/**/*.log
 **/local/**
 *.zip
+**/manuscript/**
 *.nb.html
 *.pdf
 *.html

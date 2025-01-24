@@ -139,3 +139,89 @@ val_extraction <- function(cohort, no_value = 1,
 
 
 
+# Linear Interpolation Function to get ferritin values at a specific time point
+# given the ferritin values measured on ferritin_dates
+# compute the ferritin value at start_date and end_date for treatment
+
+linear_interpolate_per_patient <- function(df, df_interpolated, day_window = 60) {
+  # Ensure the data frame has the correct column names
+  if (!all(c("ferritin_date", "ferritin") %in% colnames(df))) {
+    stop("The data frame must have columns named 'ferritin_date' and ''ferritin'.")
+  }
+  
+  # Sort the data frame by time (just in case it's not sorted)
+  df <- df %>% group_by(person_id) %>% arrange(ferritin_date) %>% ungroup()
+
+  # Perform interpolation for each patient and query time
+  result <- df_interpolated
+  result$interpolated_ferritin <- NA  # Add a column for the results
+  result$ferritin0 <- NA
+  result$ferritin1 <- NA
+
+  result$t0 <- NA
+  result$t1 <- NA
+
+  for (i in 1:dim(df_interpolated)[1]) {
+    person_id <- df_interpolated$person_id[i]
+    t <- df_interpolated$interpolated_t[i]
+    
+    # Filter the data for the current patient
+    patient_data <- df[df$person_id == person_id, ]
+    
+    # Check if query_time is within the range of the patient's time column
+    if (nrow(patient_data) == 0 || 
+        t < min(patient_data$ferritin_date) || 
+        t > max(patient_data$ferritin_date)) {
+      warning(paste("Query time for person_id", person_id, "is outside the range or data is missing."))
+      # if the value is within 30 days, use it
+        if(t >= min(patient_data$ferritin_date) - day_window && t <= min(patient_data$ferritin_date)){
+          lower = min(patient_data$ferritin_date)
+          result$interpolated_ferritin[i] <- patient_data$ferritin[patient_data$ferritin_date == lower]
+          result$ferritin0[i] <- result$interpolated_ferritin[i]
+          result$ferritin1[i] <- result$interpolated_ferritin[i]
+          result$t0[i] <- lower
+          result$t1[i] <- lower
+        } else if (t <= max(patient_data$ferritin_date) + day_window && t >= max(patient_data$ferritin_date)){
+        upper = max(patient_data$ferritin_date)
+        result$interpolated_ferritin[i] <- patient_data$ferritin[patient_data$ferritin_date == upper]
+        result$ferritin0[i] <- result$interpolated_ferritin[i]
+        result$ferritin1[i] <- result$interpolated_ferritin[i]
+        result$t0[i] <- upper
+        result$t1[i] <- upper
+        }
+#       result[i, c("interpolated_ferritin", "ferritin0", "t0", "t1", "ferritin1")] <- rep(NA, 5)
+      next
+    }
+    
+    # Find the two nearest time points for interpolation
+    lower <- max(patient_data$ferritin_date[patient_data$ferritin_date <= t])
+    upper <- min(patient_data$ferritin_date[patient_data$ferritin_date >= t])
+    
+    result$t0[i] <- lower
+    result$t1[i] <- upper
+
+    # If the query time exactly matches a time point, return the corresponding cell count
+    if (lower == upper) {
+      result$interpolated_ferritin[i] <- patient_data$ferritin[patient_data$ferritin_date == t]
+      result$ferritin0[i] <- result$interpolated_ferritin[i]
+      result$ferritin1[i] <- result$interpolated_ferritin[i]
+      next
+    }
+    
+    # Get the corresponding cell counts for lower and upper times
+    lower_count <- patient_data$ferritin[patient_data$ferritin_date == lower]
+    upper_count <- patient_data$ferritin[patient_data$ferritin_date == upper]
+    
+    # Perform linear interpolation
+    interpolated_ferritin <- lower_count + 
+      (upper_count - lower_count) * (t - lower) / (upper - lower)
+    
+    result$interpolated_ferritin[i] <- interpolated_ferritin
+    result$ferritin0[i] <- lower_count
+    result$ferritin1[i] <- upper_count
+  }
+  
+  return(result)
+
+}
+

@@ -17,14 +17,24 @@ LIC_cutoffs_binary <- c(8)
 no_LIC <- 3
 keep_ties_LIC <- TRUE
 
-# extract most recent LIC values                                 
-rslt$cr_data_LIC_recent <- results_tbl("cr_data") %>% collect() %>% 
+# extract most 3 recent LIC values                                 
+rslt$cr_data_LIC_recent_3 <- results_tbl("cr_data") %>% collect() %>% 
                                 val_extraction(cohort = ., 
                                                 no_value = no_LIC, grouping_id = record_id, 
                                                 value_name = LIC, value_date = LIC_date, 
                                                 cutoffs = LIC_cutoffs,
                                                 value_type = "LIC", keep_tie = keep_ties_LIC, 
                                                 slice_by = "most_recent")   
+
+# extract most 3 recent LIC values                                 
+rslt$cr_data_LIC_recent_1 <- results_tbl("cr_data") %>% collect() %>% 
+                                val_extraction(cohort = ., 
+                                                no_value = 1, grouping_id = record_id, 
+                                                value_name = LIC, value_date = LIC_date, 
+                                                cutoffs = LIC_cutoffs,
+                                                value_type = "LIC", keep_tie = FALSE, 
+                                                slice_by = "most_recent")   
+
 # extract highest LIC values 
 rslt$cr_data_LIC_max <- results_tbl("cr_data") %>% collect() %>% 
                                 val_extraction(cohort = ., 
@@ -43,14 +53,18 @@ LIC_ct <- results_tbl("cr_data") %>% filter(!is.na(LIC_type)) %>%
                                no_LIC_over_10_post = `no_LIC_10_post-transplant`) %>%
                         mutate(across(c("no_LIC_pre", "no_LIC_post", "no_LIC_over_10_pre", "no_LIC_over_10_post"), ~ifelse(is.na(.x), 0, .x))) %>% collect()
 
-rslt$LIC <- rslt$cr_data_LIC_recent %>% 
+rslt$LIC <- rslt$cr_data_LIC_recent_3 %>% 
+                        left_join(rslt$cr_data_LIC_recent_1 %>% select(record_id, LIC_1_level, LIC_1, LIC_1_type = LIC_type, 
+                                                                LIC_days_since_transplant_1, 
+                                                                transplant_date), by = c("record_id", "LIC_type" = "LIC_1_type", "transplant_date")) %>%
                         left_join(rslt$cr_data_LIC_max %>% select(record_id, LIC_max, LIC_3_max, 
                                                                 LIC_days_since_transplant_max, LIC_days_since_transplant_3_max,
                                                                 LIC_type_max,
                                                                 LIC_max_level, LIC_3_max_level, transplant_date), by = c("record_id", "LIC_type" = "LIC_type_max", "transplant_date")) %>%
                         mutate(LIC_level_3_binary = if_else(LIC_3 < LIC_cutoffs_binary[1], "low", "high"),
+                                LIC_level_1_binary = if_else(LIC_1 < LIC_cutoffs_binary[1], "low", "high"),
                                 LIC_level_3_max_binary = if_else(LIC_3_max < LIC_cutoffs_binary[1], "low", "high"),
-                                across(c("LIC_level_3_max_binary", "LIC_level_3_binary"), ~factor(.x, levels = c("low", "high")))) 
+                                across(c("LIC_level_3_max_binary", "LIC_level_3_binary", "LIC_level_1_binary"), ~factor(.x, levels = c("low", "high")))) 
 
 rslt$LIC %>% output_tbl("cr_LIC_data")                          
 
@@ -67,10 +81,10 @@ rslt$cr_data <- results_tbl("cr_data") %>% select(record_id, eligibility, transp
 rslt$study_cohorts <- results_tbl("study_cohorts") %>% 
                         filter(!is.na(record_id)) %>% # 21 patients were missed out from chart review, might be included later
                         left_join(rslt$cr_data, by = "record_id") %>% 
-                        mutate(transplant_date_consistency = if_else(transplant_date_cr == transplant_date, 1, 0),
-                                transplant_date = if_else(!is.na(transplant_date_cr), transplant_date_cr, transplant_date),
-                                transplant_type = if_else(!is.na(transplant_type_cr), transplant_type_cr, transplant_type),
-                                chart_completion = if_else(is.na(chart_completion), FALSE, chart_completion)) %>%
+                        mutate(transplant_date_consistency = ifelse((transplant_date_cr <= transplant_date + days(3) & transplant_date_cr <= transplant_date) | (transplant_date_cr >= transplant_date - days(3) & transplant_date_cr >= transplant_date), 1, 0),
+                                transplant_date = ifelse(!is.na(transplant_date_cr), transplant_date_cr, transplant_date),
+                                transplant_type = ifelse(!is.na(transplant_type_cr), transplant_type_cr, transplant_type),
+                                chart_completion = ifelse(is.na(chart_completion), FALSE, chart_completion)) %>%
                         filter((eligibility == "Yes" & chart_completion) | !chart_completion) %>%
                         select(-transplant_date_cr, -transplant_type_cr)
 
@@ -242,19 +256,44 @@ cohort_covars <- cohort_covars %>% left_join(gvhd, by = c("person_id", "transpla
 # cohort_covars %>% distinct(person_id, aim, gvhd_days_since_ce) %>% count() # n = 1159
 
 # VOD status, n = 203 already checked for distinct person_id
+# using the 90 days window for VOD
 vod <- results_tbl("covar_vod_dx") %>% 
         left_join(rslt$study_cohorts %>% select(person_id, transplant_date), by = "person_id") %>%
         mutate(vod_date := pmin(min_defi_abd_date, min_bili_abd_date, min_bili_abd_weight_date, na.rm = TRUE)) %>%
-        collect() %>% filter(as.numeric(difftime(vod_date, transplant_date, units = "days")) <= 90 |
-                                (vod_date >= transplant_date) | 
+        collect() 
+        
+vod_90 <- vod %>% filter((as.numeric(difftime(vod_date, transplant_date, units = "days")) <= 90 &
+                                vod_date >= transplant_date) | 
                                 abs(as.numeric(difftime(abd_date, transplant_date, units = "days"))) <= 7) %>% 
         distinct(person_id, vod_cat_1, vod_cat_2, vod_cat_3, vod_cat_4, vod_cat_5, vod) 
-vod_cat2_ids <- vod %>% filter(vod_cat_2 == 2, is.na(vod_cat_1), is.na(vod_cat_3), is.na(vod_cat_4), is.na(vod_cat_5))
-vod <- vod %>% anti_join(vod_cat2_ids, by = "person_id")
+vod_cat2_ids <- vod_90 %>% filter(vod_cat_2 == 2, is.na(vod_cat_1), is.na(vod_cat_3), is.na(vod_cat_4), is.na(vod_cat_5))
+vod_90 <- vod_90 %>% anti_join(vod_cat2_ids, by = "person_id") %>%
+            rename("vod_cat_1_90" = "vod_cat_1", "vod_cat_2_90" = "vod_cat_2", "vod_cat_3_90" = "vod_cat_3",
+                  "vod_cat_4_90" = "vod_cat_4",
+                  "vod_cat_5_90" = "vod_cat_5", "vod_90" = "vod")
+
+# using the 30 days window for VOD
+vod_30 <- vod %>% filter((as.numeric(difftime(vod_date, transplant_date, units = "days")) <= 30 &
+                                vod_date >= transplant_date) | 
+                                abs(as.numeric(difftime(abd_date, transplant_date, units = "days"))) <= 7) %>% 
+        distinct(person_id, vod_cat_1, vod_cat_2, vod_cat_3, vod_cat_4, vod_cat_5, vod) 
+
+vod_cat2_ids_30 <- vod_30 %>% filter(vod_cat_2 == 2, is.na(vod_cat_1), is.na(vod_cat_3), is.na(vod_cat_4), is.na(vod_cat_5))
+vod_30 <- vod_30 %>% anti_join(vod_cat2_ids_30, by = "person_id")
+
+
 vod %>% distinct_ct()
 # vod %>% arrange(person_id) %>% view()        
-cohort_covars <- cohort_covars %>% left_join(vod, by = "person_id") %>%
-                        mutate(vod = if_else(!is.na(vod), TRUE, FALSE))
+cohort_covars <- cohort_covars %>% left_join(vod_90, by = c("person_id")) %>% 
+                        mutate(vod_90 = if_else(!is.na(vod_90), TRUE, FALSE)) %>%
+                        left_join(vod_30 #%>% 
+                              #   rename(c("vod_cat_1_30" = "vod_cat_1",
+                              #   "vod_cat_2_30" = "vod_cat_2",
+                              #   "vod_cat_3_30" = "vod_cat_3",
+                              #   "vod_cat_4_30" = "vod_cat_4",
+                              #   "vod_cat_5_30" = "vod_cat_5","vod_30" = "vod",))
+                              , by = c("person_id")) %>% 
+                        mutate(vod = if_else(!is.na(vod), TRUE, FALSE)) 
 
 # cohort_covars %>% distinct_ct() # n = 723
 # cohort_covars %>% distinct(person_id, aim, vod_date) %>% count() # n = 1159
@@ -379,7 +418,7 @@ conditioning_agents <- cohort_covars %>% distinct(person_id, transplant_date) %>
                         left_join(results_tbl("conditioning_agents_rx_px") %>% collect(), by = "person_id") %>% 
                         filter(exposure_date <= transplant_date, exposure_date >= transplant_date - days(30)) %>%
                         group_by(person_id, transplant_date, drug_type, conditioning_type) %>%
-                        slice_max(exposure_date, n = 1, with_ties = FALSE) %>% ungroup() %>% view()
+                        slice_max(exposure_date, n = 1, with_ties = FALSE) %>% ungroup() 
 
 conditioning_agents_ct <-  conditioning_agents %>% group_by(person_id, transplant_date) %>% 
                                 summarise(no_conditioning_agents = n_distinct(conditioning_type)) %>% 
@@ -418,11 +457,11 @@ cohort_covars <- cohort_covars %>% mutate(transplant_type_combined_old = case_wh
 # new criteria for transplant type is
 cohort_covars <- cohort_covars %>% mutate(transplant_type_combined = case_when(transplant_type == "Autologous/Gene therapy" ~ "autologous/genetherapy",
                                                 match_status %in% c("8/8", "10/10") & donor_relation == "Related" ~ "matched related",
-                                                match_status == "Cord Blood" ~ "Allogeneic: Cord Blood",
-                                                !is.na(match_status) & !is.na(donor_relation) ~ "matched unrelated/mismatched unrelated/mismatched related", 
+                                                match_status == "Allogeneic: Cord Blood" ~ "matched unrelated/mismatched unrelated/mismatched related/cord blood", 
+                                                !is.na(match_status) & !is.na(donor_relation) ~ "matched unrelated/mismatched unrelated/mismatched related/cord blood", 
                                                 TRUE ~ "Unknown")) 
 
-
+# cohort_covars %>% distinct(transplant_type_combined)
 
 # get the list of patients with haploidentical unrelated status
 # cohort_covars %>% filter(match_status == "Haploidentical" & donor_relation == "Unrelated") %>% select(record_id) 
@@ -438,3 +477,296 @@ cohort_covars %>% filter(transplant_type_combined == "Unknown") %>% select(recor
 # cohort_covars %>% filter(leukemia_prior, eligibility == "Yes") %>% select(record_id) %>% view()
 cohort_covars %>% output_tbl("analytics_dataset")   
 
+# number of transplant patients with no qualifying LIC or ferritin measuremnets in the first year
+LIC <- results_tbl("cr_data") %>% select(record_id, site, eligibility, LIC_date, LIC) %>%
+            left_join(results_tbl("study_cohorts") %>% select(person_id, record_id), by = "record_id") %>%
+            filter(!is.na(LIC))
+ferritin <- results_tbl("covar_ferritin_mx") %>% select(person_id, ferritin, ferritin_date)
+
+LIC_patients <- results_tbl("no_multi_transplant_px") %>% left_join(LIC, by = "person_id") %>% 
+            filter(transplant_date >= LIC_date - days(365),
+                transplant_date <= LIC_date + days(365)) %>%
+            distinct(person_id)
+
+ferritin_patients <- results_tbl("no_multi_transplant_px") %>% left_join(ferritin, by = "person_id") %>% 
+            filter(transplant_date >= ferritin_date - days(365),
+                    transplant_date <= ferritin_date + days(365)) %>%
+            distinct(person_id)
+
+results_tbl("no_multi_transplant_px") %>% distinct(person_id) %>% 
+                anti_join(LIC_patients %>% full_join(ferritin_patients)) %>% distinct_ct()
+
+# get vod patients for Nora
+results_tbl("analytics_dataset") %>% 
+        filter(no_LIC_post>=1 | no_LIC_pre >=1 | no_ferritin_pre >= 1| no_ferritin_post >= 1) %>% 
+        filter(vod) %>% filter(site == "chop") %>% 
+        distinct(person_id) %>%
+        left_join(results_tbl("study_cohorts") %>% select(person_id, record_id), by = "person_id") %>%
+        output_tbl("vod_patients_chop", file = TRUE, local = TRUE)
+
+
+# write out attrition data for aim 3
+init_sum(cohort = 'Start', persons = 0)
+
+# ferritin reductions for aim_3
+# potential aim 3, n = 158
+aim_3 <- results_tbl("study_cohorts") %>% filter(aim_3_2 | aim_3_1)
+append_sum(cohort = 'No. patients identified by initial feasibility counts for aim 3',
+             persons = distinct_ct(aim_3))
+
+# exclude false positive patients from chart reviews, n = 139
+aim_3 <- aim_3 %>% anti_join(results_tbl("cr_data") %>%
+                    filter(eligibility == "No") %>% select(record_id), by = "record_id")
+append_sum(cohort = 'Above counts excluding false positives from chart reviews',
+             persons = distinct_ct(aim_3))
+no_ferritin_aim3_ct <- aim_3 %>% distinct_ct()
+
+# if the patient had chart reviews, use the transplant_date from chart reviews
+aim_3 <- aim_3 %>% left_join(results_tbl("analytics_dataset") %>% filter(chart_completion, eligibility == "Yes") %>% 
+                                  distinct(record_id, transplant_date) %>% mutate(is_cr = TRUE), by = "record_id") %>%
+                    mutate(transplant_date.x = ifelse(is_cr, transplant_date.y, transplant_date.x)) %>%
+                    rename(transplant_date = transplant_date.x) %>%
+                    select(-transplant_date.y)
+
+# get ferritin data, n = 139 patients with valid ferritin 
+aim3 <- aim_3 %>%
+      select(record_id, person_id, transplant_date) %>%
+      left_join(results_tbl("covar_ferritin_mx"), by = "person_id") %>% 
+      filter(transplant_date <= ferritin_date) %>% 
+      filter(ferritin_date - transplant_date <= 600) %>%
+      filter(!is.na(ferritin)) %>%
+      group_by(person_id) %>% 
+      mutate(n = n()) %>% filter(n >=1) %>% ungroup()
+      
+aim3_ct <- aim_3 %>% distinct_ct()
+append_sum(cohort = 'Above counts with at least 1 ferritin measurement within 1 year of transplant',
+             persons = distinct_ct(aim_3))
+
+# find therapeutic phlebotomy, n = 43
+phleb_px <- aim_3 %>%
+      # filter(chart_completion, eligibility == "Yes") %>%
+      select(record_id, person_id, transplant_date) %>%
+      find_procedures(procedure_codeset_name = "therapeutic_phleb_px") %>% 
+      filter(procedure_date >= transplant_date)
+
+append_sum(cohort = 'No. patients with therapeutic phlebotomy after transplant',
+             persons = distinct_ct(phleb_px))
+
+phleb_px_1yr <- phleb_px %>%      
+      filter(procedure_date - transplant_date <= 365) %>% 
+      group_by(person_id) %>%
+      collect_new() %>%
+      mutate(start_date = min(procedure_date, na.rm = TRUE), 
+             end_date = max(procedure_date, na.rm = TRUE),
+             duration = as.numeric(end_date - start_date)) %>% ungroup() %>%
+      distinct(person_id, record_id, start_date, end_date, transplant_date, duration) %>% 
+      mutate(route = NA) %>%
+      mutate(IRT_type = "phlebotomy") 
+
+append_sum(cohort = 'No. patients with therapeutic phlebotomy within 1 year of transplant',
+             persons = distinct_ct(phleb_px_1yr))
+
+# patients who got chelation, n = 20
+dx_codeset<- load_codeset("deferoxamine_rx") %>% mutate(type = "deferoxamine") %>% #deferoxamine
+                union(load_codeset("deferasirox_rx") %>% mutate(type = "deferasirox")) %>% #deferasirox
+                compute_new(temp = TRUE, name = "drug_id")
+
+# patients who got chelation, n = 20
+chelation_rx <- aim_3 %>%
+      # filter(chart_completion, eligibility == "Yes") %>%
+      select(record_id, person_id, transplant_date) %>%
+      find_drugs(dx_codeset) %>% 
+      filter(drug_exposure_start_date >= transplant_date) %>% collect() 
+
+append_sum(cohort = 'No. patients received deferoxamine/deferasirox after transplant',
+             persons = distinct_ct(chelation_rx))
+
+chelation_rx <- chelation_rx %>%
+      filter(drug_exposure_start_date - transplant_date <= 365) %>% 
+      distinct(person_id, drug_exposure_start_date, IRT_type = type, .keep_all = TRUE) 
+
+append_sum(cohort = 'No. patients received deferoxamine/deferasirox within 1 year after transplant',
+             persons = distinct_ct(chelation_rx))
+
+# for intravenous drugs, assume a single one per day, n = 3
+chelation_iv <- chelation_rx %>% filter(route_source_value %in% c("Intravenous", "IV", "Injection", "Subcutaneous")) %>%
+      group_by(person_id, IRT_type) %>%
+      arrange(person_id, drug_exposure_start_date) %>% 
+      # collect_new() %>% 
+      mutate(start_date = min(drug_exposure_start_date, na.rm = TRUE), 
+             end_date = max(drug_exposure_start_date, na.rm = TRUE),
+             duration = as.numeric(end_date - start_date)) %>% ungroup() %>%
+      distinct(person_id, record_id, start_date, end_date, transplant_date, duration, .keep_all = TRUE) %>% 
+      mutate(route = "IV") %>%
+      select(person_id, record_id, start_date, end_date, transplant_date, duration, IRT_type, route)
+
+# oral drugs, n = 14
+chelation_oral <- chelation_rx %>% filter(!(route_source_value %in% c("Intravenous", "IV", "Injection", "Subcutaneous")) | 
+                                          is.na(route_source_value)) %>%
+      filter(!is.na(quantity) | !is.na(days_supply)) %>% 
+      # collect_new() %>%
+      mutate(refills = if_else(is.na(refills), 0, refills)) %>%
+      arrange(person_id, drug_exposure_start_date) %>%
+      # select(person_id, drug_exposure_start_date, quantity, refills, IRT_type, route_source_value) %>%
+      group_by(person_id, IRT_type) %>% 
+      mutate(start_date = drug_exposure_start_date, # min(drug_exposure_start_date, na.rm = TRUE), 
+             end_date = drug_exposure_start_date + days(quantity*(refills+1)),
+             duration = quantity) %>% ungroup() %>%
+      distinct(person_id, record_id, start_date, end_date, transplant_date, duration, quantity, refills, .keep_all = TRUE) %>% 
+      select(person_id, record_id, start_date, end_date, transplant_date, duration, quantity, refills, IRT_type, route = route_source_value) %>% 
+      arrange(person_id) 
+
+# Only took the duration of the first prescription, some prescriptions have up to 11 refills 
+# patients with missing both days supply and quantity, n = 4
+missing_duration <- chelation_rx %>% anti_join(chelation_oral, by = "person_id") %>% anti_join(chelation_iv, by = "person_id") %>% 
+      select(person_id, record_id, drug_exposure_start_date, transplant_date, days_supply, quantity, refills, IRT_type, route = route_source_value) 
+
+# append the chelation and IRT patients
+irt <- phleb_px_1yr %>% collect() %>%
+          union(chelation_iv) %>% mutate(quantity = NA, refills = NA) %>% 
+          union(chelation_oral) 
+
+append_sum(cohort = 'No. patients received deferoxamine/deferasirox within 1 year of transplant',
+             persons = distinct_ct(irt %>% filter(IRT_type != "phlebotomy")))
+append_sum(cohort = 'No. patients received deferoxamine/deferasirox within 1 year of transplant with missing duration',
+             persons = distinct_ct(missing_duration))
+
+irt_exclude <- irt %>% group_by(record_id) %>% 
+      summarise(n = n()) %>% 
+      filter(n> 1) %>% ungroup()
+
+append_sum(cohort = 'No. patients received both phlebotomy and deferoxamine/deferasirox with non-overlapping period (excluded)',
+             persons = irt_exclude %>% distinct_ct("record_id"))
+
+irt_exclude %>% 
+      inner_join(irt, by = "record_id") %>% 
+      arrange(record_id) %>%
+      select(-person_id) %>% view()
+
+# there are patients who got more than 1 IRT treaments, we do have to double check
+irt <- irt %>% group_by(record_id, IRT_type) %>%
+          mutate(start_date = min(start_date, na.rm = TRUE)) %>%
+          mutate(end_date = max(end_date, na.rm = TRUE))
+
+irt <- irt %>% anti_join(irt_exclude, by = "record_id")
+
+ferritin_start <- irt %>% copy_to_new(df = ., name = "irt") %>%
+      inner_join(results_tbl("covar_ferritin_mx") %>%
+                  select(person_id, ferritin_date, ferritin), by = "person_id") %>% 
+      filter(transplant_date <= ferritin_date) %>%
+      filter(!is.na(ferritin)) %>%
+      # filter(transplant_date - ferritin_date <= 365) %>%
+      group_by(person_id) %>% 
+      filter(start_date <= ferritin_date) %>%
+      slice_max(start_date, n =1, with_ties = FALSE) %>% ungroup() %>%
+      select(person_id, record_id, transplant_date, start_date, ferritin0_date = ferritin_date, ferritin0 = ferritin) 
+      
+
+ferritin_end <- irt %>% copy_to_new(df = ., name = "irt") %>%
+      inner_join(results_tbl("covar_ferritin_mx") %>%
+                  select(person_id, ferritin_date, ferritin), by = "person_id") %>% 
+      filter(transplant_date <= ferritin_date) %>%
+      filter(!is.na(ferritin)) %>%
+      filter(end_date <= ferritin_date) %>%
+      group_by(person_id) %>% 
+      slice_min(end_date, n =1, with_ties = FALSE) %>% ungroup() %>%
+      select(person_id, record_id, transplant_date, end_date, ferritinf_date = ferritin_date, ferritinf = ferritin)
+
+ferritin_all <- irt %>% copy_to_new(df = ., name = "irt") %>% 
+      inner_join(results_tbl("covar_ferritin_mx") %>%
+                  select(person_id, ferritin_date, ferritin), by = "person_id") %>%
+      filter(transplant_date <= ferritin_date) %>%
+      filter(!is.na(ferritin)) %>%
+      filter(transplant_date - ferritin_date <= 365) %>% collect_new()
+
+ferritin_0 <- ferritin_all %>% group_by(person_id, IRT_type) %>%
+          slice_min(abs(start_date - ferritin_date), n = 1, with_ties = FALSE) %>% ungroup() %>%
+          select(record_id, person_id, IRT_type, start_date, ferritin_date_0 = ferritin_date, ferritin_0 = ferritin)
+
+ferritin_f <- ferritin_all %>% group_by(person_id, IRT_type) %>%
+          slice_min(abs(end_date - ferritin_date), n = 1, with_ties = FALSE) %>% ungroup() %>%
+          select(record_id, person_id, IRT_type, start_date, ferritin_date_f = ferritin_date, ferritin_f = ferritin)
+ferritin_change <- ferritin_0 %>% left_join(ferritin_f, by = c("record_id", "person_id", "IRT_type", "start_date")) %>%
+          mutate(ferritin_change_rate = (ferritin_f - ferritin_0)/as.numeric((ferritin_date_f - ferritin_date_0))) 
+
+table1(~ferritin_change_rate| IRT_type, 
+      data = ferritin_change,
+      caption = "Post-transplant iron reduction therapy",
+      overall = FALSE)
+
+# 47 patients, 
+# only 37 patients with duration > 0 (the other 10 patients only had a single phlebotomy procedure) 
+# remove 3 more for missing ferritin values
+
+p1 <- ferritin_all %>% 
+      mutate(ferritin_date = as.numeric(ferritin_date - transplant_date)) %>%
+      mutate(start_date = as.numeric(start_date - transplant_date)) %>%
+      mutate(end_date = as.numeric(end_date - transplant_date)) %>% 
+      filter(duration > 0) %>% 
+      ggplot(aes(x = ferritin_date, y = ferritin, group = record_id)) + 
+      geom_point() + 
+      geom_line() +
+      geom_vline(aes(xintercept = start_date), linetype = "dashed", color = "red") +
+      geom_vline(aes(xintercept = end_date), linetype = "dashed", color = "red") +
+      xlim(c(0, 500)) + 
+      facet_wrap(~person_id, ncol = 3)
+
+ggsave("reporting/irt_ferritin_trjectories.png", p1, width = 20, height = 30, units = "cm", dpi = 300)
+
+# now slice the ferritin values
+# ferritin_0 is the closet value before the start date within 30 days
+# 23 patients 
+# test has 34 patients after removing 3 patients with missing ferritin values 
+# limit values to just 1 year, 29 patients with valid ferritin values 
+append_sum(cohort = 'No. patients with only 1 ferritin measuremnt (excluded)',
+             persons = 3)
+
+test <- ferritin_all %>% 
+      mutate(ferritin_date = as.numeric(ferritin_date - transplant_date)) %>%
+      mutate(start_date = as.numeric(start_date - transplant_date)) %>%
+      mutate(end_date = as.numeric(end_date - transplant_date)) %>% 
+      filter(!(person_id %in% c(4502732, 599793, 9720611))) %>%  #remove patients with missing ferritin values
+      filter(duration > 0) %>%
+      filter(ferritin_date <= 365) %>% 
+      mutate(end_date = case_when(person_id == 298603 ~ start_date + quantity, 
+                                TRUE ~ end_date)) # fix the durations for this patients
+      # filter(ferritin_date <= start_date) %>%
+      # filter(ferritin_date >= start_date - 30) %>%
+      # group_by(person_id) %>%
+      # slice_max(ferritin_date, n = 1, with_ties = FALSE) %>% ungroup() 
+
+append_sum(cohort = 'No. patients with at least 2 ferritin measurements after transplant and treatment durations > 0',
+             persons = distinct_ct(test))
+
+ferritin_start <- linear_interpolate_per_patient(df = test, df_interpolated = test %>% distinct(person_id, start_date) %>% rename(c("interpolated_t" = "start_date")))
+ferritin_start %>% view()
+
+ferritin_end <- linear_interpolate_per_patient(df = test, df_interpolated = test %>% distinct(person_id, end_date) %>% rename(c("interpolated_t" = "end_date")))
+ferritin_end %>% view()
+
+# fit a linear line to the ferritin change
+final_ferritin_trjectories <- ferritin_start %>% select(person_id, t0 = interpolated_t, f0 = interpolated_ferritin) %>%
+      full_join(ferritin_end %>% select(person_id, t1 = interpolated_t, f1 = interpolated_ferritin), by = "person_id") %>%
+      filter(!is.na(f0), !is.na(f1)) %>%
+      mutate(f_change = (f0-f1)/(t1-t0)/30) 
+
+append_sum(cohort = 'No. patients with at least 2 ferritin measurements, each is within 60 days of treatment start and end dates',
+             persons = distinct_ct(final_ferritin_trjectories))
+
+# output attrition
+output_sum(name = "attrition_aim3", local = TRUE, file = TRUE)
+
+final_ferritin_trjectories %>% ggplot(aes(x = t1-t0, y = f_change)) + geom_point() + geom_smooth() 
+      
+ferritin_all %>% output_tbl("ferritin_trajectories_IRT")
+
+
+# moves table from db 5.1 to db 5.5
+select(person_id, record_id, transplant_date)
+cohort <- results_tbl("study_cohorts") %>% collect()
+cohort_covars <- results_tbl("analytics_dataset") %>% collect() 
+cr_data <- results_tbl("cr_data") %>% collect() 
+
+cohort %>% output_tbl("study_cohorts")
+cohort_covars %>% output_tbl("analytics_dataset")
+cr_data %>% output_tbl("cr_data")

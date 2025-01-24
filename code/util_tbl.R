@@ -63,8 +63,12 @@ dbi_con <- function(db) {
 #' @md
 cdm_tbl <-
   function(name, db = config('db_src'))
-    # .qual_tbl(name, 'cdm_schema', db)
-    .qual_tbl(paste0("cdm_", name), 'results_schema', db) # after cutting mini cdm
+    if(Sys.getenv("db_version") == "5.5"){
+      .qual_tbl(name, 'cdm_schema', db)
+    } else if (Sys.getenv("db_version") == "5.1"){
+      .qual_tbl(paste0("cdm_", name), 'results_schema', db) # after cutting mini cdm
+    }
+    
 
 #' Connect to an existing CDM vocabulary table
 #'
