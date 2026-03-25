@@ -24,3 +24,4 @@
 *.json
 **/manuscript/**
 **/docs/**
+**/results/**.xlsx
