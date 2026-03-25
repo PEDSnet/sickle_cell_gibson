@@ -1,0 +1,405 @@
+---
+title: "Blood Advance Replies to Reviewers"
+author: "Nhat Nguyen \n PEDSnet Coordinating Center"
+date: "`r format(Sys.time(), '%B %d, %Y')`"
+format:
+  html:
+    page-layout: full
+    embed-resources: true
+    smooth-scroll: true
+    fig-cap: TRUE
+    df-print: paged
+    toc: TRUE
+    toc-depth: 5
+    toc-collapsed: TRUE
+    toc-float: TRUE
+    toc-location: left
+    number-sections: TRUE
+    number-depth: 3
+    output-file: blood_advance_reviews
+    output-ext: "html"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, message = FALSE, warning = FALSE, fig.width = 10, fig.height = 6, fig.align = "center")
+# Default taken from R notebook behavior: when knitting, wd will always be location of notebook
+base_dir <- '..'
+Sys.setenv(db_version = "5.1")
+Sys.setenv(PEDSNET_SKIP_REQUEST_EXECUTION=1)
+Sys.setenv(db_version = "5.1")
+
+tryCatch(source('../site/run.R'),
+         error = function (e) message(e)) # May not be able to make db connection
+
+# Set to "local" to read data from ../results, or another value to read from db
+data_source <- "not_local" #if_else(config('execution_mode') == 'distribution', 'local', 'not_local')
+
+require(tidyr)
+require(knitr)
+require(kableExtra)
+require(stringr)
+require(tibble)
+require(ggplot2)
+require(table1)
+require(tidyverse)
+require(ggpubr) #linear fit 
+```
+
+```{r functions, include=FALSE}
+get_codesets <- function(codeset_name) {
+  read_csv(paste0('../specs/', codeset_name, '.csv'), col_types = c('c', 'c', 'c', 'c'), show_col_types = FALSE) %>%
+  mutate(concept_id = as.character((concept_id)), concept_code = as.character((concept_code))) %>% collect()
+}
+
+get_results <- function(tbl_name) {
+  if (data_source == 'local') {
+    rslt <- read.csv(paste0('../local/', tbl_name, '.csv'))
+  }
+  else {
+    rslt <- results_tbl(tbl_name) %>% collect()
+  }
+  rslt
+}
+
+prettify_kable <- function(data) {
+  rslt <- data %>% kable(digits = 4, format.args = list(big.mark = ','))
+  if (knitr::is_html_output()) rslt <- rslt %>%
+      kable_styling(bootstrap_options = c("striped", "hover")) %>%
+      column_spec(1, bold = T, border_right = T)
+  rslt
+}
+
+my.render.cont <- function(x) {
+    with(stats.apply.rounding(stats.default(x), digits=2), c("",
+        "Median (IQR)"=sprintf("%s [%s, %s]", MEDIAN, Q1, Q3)))
+}
+
+pvalue <- function(x, ...) {
+    # Construct vectors of data y, and groups (strata) g
+    y <- unlist(x)
+    g <- factor(rep(1:length(x), times=sapply(x, length)))
+    no_groups = length(unique(g))
+
+    if (is.numeric(y) & no_groups == 2) {
+        # For numeric variables, perform a standard 2-sample t-test
+        p <- t.test(y ~ g)$p.value
+    } else if (is.numeric(y) & no_groups >2) {
+        # For numeric variables with more than 2 populations perform an anova tests
+        anova_result <- aov(y ~ g)
+        p <- summary(anova_result)[[1]][["Pr(>F)"]][1]
+    } else {
+        # For categorical variables, perform a chi-squared test of independence
+        p <- chisq.test(table(y, g))$p.value
+    }
+    # Format the p-value, using an HTML entity for the less-than sign.
+    # The initial empty string places the output on the line below the variable label.
+    c("", sub("<", "&lt;", format.pval(p, digits=3, eps=0.001)))
+}
+
+# compute proportion of VOD varried by ferritin or LIC cutoff
+
+vod_prop_calculation <- function(df, iron_var){
+
+  # min_val = round(min(df %>% select(ferritin), na.rm = TRUE))
+  # max_val = ceiling(max(df %>% select(ferritin), na.rm = TRUE))
+
+  min_val = min(df %>% select({{iron_var}}), na.rm = TRUE)
+  max_val = max(df %>% select({{iron_var}}), na.rm = TRUE)
+
+  total = nrow(df)
+  iron_val = seq(min_val,max_val, by =1)
+  prop = rep(NA, length(iron_val)) 
+  # prop[,1] = iron_val  
+
+  for(i in 1:1:length(iron_val)){
+    prop[i] <- nrow(df %>% select({{iron_var}}) %>% filter({{iron_var}} >= iron_val[i]))/total #{{iron_var}}
+  }
+
+  return (data.frame(cutoff = iron_val, prop = prop))
+}
+
+site_mask <- function(cohort_tbl){
+  cohort_tbl %>%
+    mutate(site = case_when(site == "chop" ~ "site_1",
+                          site == "colorado" ~ "site_2",
+                          site == "stanford" ~ "site_3",
+                          site == "lurie" ~ "site_4",
+                          site == "seattle" ~ "site_5",
+                          site == "nationwide" ~ "site_6",
+                          site == "nemours" ~ "site_7",
+                          site == "cchmc" ~ "site_8",
+                          TRUE ~ NA)) %>% return()
+}
+```
+
+# Transferritin Saturation measurement
+- To look for transferritin saturation measurement within 1 year before transplant
+
+## First approach: Transferrin saturation codes
+- I did a string search on the keywords "transferrin" or "TFN" and this is all the codes that were found in the database. 
+- When I used the above codeset to look for transferrin saturation measurement within 1 year of transplant. I only found 3 records, and only 1 of the three records were within 1 year of transplant. 
+```{r transferritin_ct_1, echo= FALSE, message=FALSE}
+
+read.csv("../specs/transferrin_saturation_labs.csv") %>% 
+    select(concept_id, concept_name, vocabulary_id, concept_code) %>%
+    mutate(concept_id = as.character(concept_id)) %>%
+    prettify_kable()
+
+cohort_covars <- results_tbl("analytics_dataset")
+stat_dataset <- results_tbl("survival_analysis_dataset") 
+ferritin_data <- results_tbl("cr_ferritin_data") 
+lic_data <- results_tbl("cr_LIC_data") 
+
+stat_dataset_bac <-  stat_dataset %>%
+            left_join(ferritin_data, by = c("person_id", "transplant_date")) %>%       
+                filter(chart_completion, eligibility == "Yes", !is.na(ferritin_pre)) %>%
+                mutate(ferritin_pre = if_else(ferritin_pre %in% c("low", "moderate"), "low-moderate", "high")) %>%
+                filter(!is.na(survival_time_5yr_censored)) %>%
+                mutate(bacteremia = ifelse(is.na(bacteremia), FALSE, bacteremia))
+
+stat_dataset_bac_lic <-  stat_dataset %>%
+            left_join(lic_data %>% 
+                  select(record_id, transplant_date,LIC_level_1_binary, LIC_1, LIC_type, LIC_level), by = c("record_id", "transplant_date")) %>%       
+                filter(chart_completion, eligibility == "Yes", 
+                      # !is.na(LIC_level_1_binary),
+                      LIC_type == "pre-transplant", !is.na(LIC_level)) %>%
+                # filter(transplant_type_combined != "autologous/genetherapy") %>%
+                filter(!is.na(survival_time_5yr_censored)) %>%
+                mutate(bacteremia = ifelse(is.na(bacteremia), FALSE, bacteremia))
+
+# cohort_covars %>%
+stat_dataset_bac %>% 
+  select(person_id, transplant_date, ferritin_pre) %>%
+  inner_join(results_tbl("cdm_measurement") %>%
+            inner_join(load_codeset("transferrin_saturation_labs"), by = c("measurement_concept_id" = "concept_id")), by = "person_id") %>% collect() %>% 
+  # filter(measurement_date <= transplant_date) %>% collect() %>%
+  filter(abs(as.numeric(difftime(transplant_date, measurement_date, units = "days"))) <= 365) %>% 
+  select(ferritin_level_pre_transplant = ferritin_pre, 
+        transferrin_sat_perc = value_as_number) %>%
+  view()
+```
+
+## Second approach: Transferrin saturation measurements within 1 year of transplant
+- Instead of relying on the pre-identified codeset to find transferrin saturation measurement, I looked for any "transferrin" or "TFN" keyword in the whole database for our cohorts. 
+
+### Pre-transplant ferritin vs. transferrin levels
+
+- These are all the records that I found within 1 year of transplant. 
+```{r transferritin_ct_2, echo= FALSE, message=FALSE}
+transferritin_tbl <- results_tbl("cdm_measurement") %>%
+  filter(grepl("transferrin|TFN", measurement_source_value, ignore.case = TRUE) | grepl("transferrin", measurement_concept_name, ignore.case = TRUE)) %>%
+  inner_join(stat_dataset_bac %>% select(person_id, transplant_date, ferritin_pre, ferritin_pre_val, scd_type), by = "person_id") %>%
+  filter(measurement_date <= transplant_date) %>% collect() %>%
+  filter(abs(as.numeric(difftime(transplant_date, measurement_date, units = "days"))) <= 365)
+  
+transferritin_tbl  %>% 
+  group_by(measurement_concept_name) %>% 
+  summarise(n = n_distinct(measurement_id)) %>% ungroup() %>% 
+  prettify_kable()
+```
+
+- For the 3 types of measurements "Iron saturation [Mass Fraction] in Serum or Plasma", "Iron/Transferrin [Mass Ratio] in Serum or Plasma", and "Transferrin saturation", the units of measurements in the database is "%". However, I found values above 100, which I'm not so sure about. 
+- I'm showing both the raw values and the stats groupped by pre-transplant ferritin values
+
+- n = 126 with "Iron/Transferrin [Mass Ratio] in Serum or Plasma" measured within 1 year before transplant. 
+- n = 188 with transferrin_sat_perc <= 100 
+- Some patients have more than 1 measurements, extracting the closet value to transplant dates gives us n = 66
+
+```{r transferritin_ct_3, echo= FALSE, message=FALSE}
+transferritin_tbl <- transferritin_tbl  %>% 
+# "Iron saturation [Mass Fraction] in Serum or Plasma" , "Transferrin saturation"
+  filter(measurement_concept_name %in% c("Iron/Transferrin [Mass Ratio] in Serum or Plasma")) %>%
+  filter(value_as_number <= 100) %>%
+  group_by(person_id) %>%
+  slice_max(measurement_date, n = 1, with_ties = FALSE) %>%
+  ungroup() %>%
+  select(ferritin_level_pre_transplant = ferritin_pre, 
+        ferritin_pre_transplant = ferritin_pre_val, 
+        transferrin_sat_perc = value_as_number,
+        measurement_concept_name,
+        scd_type) 
+
+transferritin_tbl %>% select(-scd_type) %>% prettify_kable()
+
+plot_title_text_size <- 10
+axis_text_size <- 4
+
+transferritin_tbl %>% ggplot(aes(x = transferrin_sat_perc, y = ferritin_pre_transplant)) +
+  geom_point(color = "black", size = 3.5, alpha = 0.6) + # Scatter points
+  geom_smooth(method = "lm", se = FALSE, color = "red", linetype = "dashed") + # Regression line
+  stat_regline_equation(label.x = 75, label.y = 2700, aes(label = ..eq.label..), 
+                        size = 6) + # Equation
+  stat_regline_equation(label.x = 75, # R-squared
+                        label.y = 3000, 
+                        aes(label = paste(..rr.label..)), 
+                        parse = TRUE, # Enables proper superscript
+                        size = 6) + # Increase text size
+  labs(title = "Ferritin vs. Transferrin Saturation Correlation",
+       y = "Ferritin (ng/mL)",
+       x = "Transferrin Saturation (%)") +
+  # ylim(0, 60) +
+  theme(plot.title = element_text(size = plot_title_text_size),    # Title text size
+    axis.title.x = element_text(size = axis_text_size), # X-axis title size
+    axis.title.y = element_text(size = axis_text_size), # Y-axis title size
+    axis.text.x = element_text(size = axis_text_size),  # X-axis labels size
+    axis.text.y = element_text(size = axis_text_size)   # Y-axis labels size
+  ) + theme_classic()
+```
+
+- Grouping by disease type: 
+```{r transferritin_ct_4, echo= FALSE, message=FALSE}
+transferritin_tbl %>% 
+  group_by(scd_type) %>%
+  summarise(n_persons = n(), 
+            min_transferrin_sat = min(transferrin_sat_perc),
+            median_transferrin_sat = median(transferrin_sat_perc), 
+            max_transferrin_sat = max(transferrin_sat_perc),
+            min_ferritin = min(ferritin_pre_transplant),
+            median_ferritin = median(ferritin_pre_transplant),
+            max_ferritin = max(ferritin_pre_transplant)) %>%
+  prettify_kable()
+```
+
+- Grouping by disease type and ferritin levels:
+```{r transferritin_ct_5, echo= FALSE, message=FALSE}
+transferritin_tbl %>% 
+  group_by(ferritin_level_pre_transplant, scd_type) %>%
+  summarise(n_persons = n(), 
+            min_transferrin_sat = min(transferrin_sat_perc),
+            median_transferrin_sat = median(transferrin_sat_perc), 
+            max_transferrin_sat = max(transferrin_sat_perc),
+            min_ferritin = min(ferritin_pre_transplant),
+            median_ferritin = median(ferritin_pre_transplant),
+            max_ferritin = max(ferritin_pre_transplant)) %>%
+  prettify_kable()
+```
+
+### Pre-transplant LIC vs. transferrin levels
+- n = 162 with "Iron/Transferrin [Mass Ratio] in Serum or Plasma" measured within 1 year before transplant. 
+- n = 116 with transferrin_sat_perc <= 100 
+- Some patients have more than 1 measurements, extracting the closet value to transplant dates gives us n = 36
+```{r transferritin_ct_lic, echo= FALSE, message=FALSE}
+transferritin_tbl_lic <- results_tbl("cdm_measurement") %>%
+  filter(grepl("transferrin|TFN", measurement_source_value, ignore.case = TRUE) | grepl("transferrin", measurement_concept_name, ignore.case = TRUE)) %>%
+  inner_join(stat_dataset_bac_lic %>% 
+      select(person_id, transplant_date, 
+          LIC_level_1_binary, LIC_1, scd_type), by = "person_id") %>%
+  filter(measurement_date <= transplant_date) %>% collect() %>%
+  filter(abs(as.numeric(difftime(transplant_date, measurement_date, units = "days"))) <= 365)
+  
+transferritin_tbl_lic  %>% 
+  group_by(measurement_concept_name) %>% 
+  summarise(n = n_distinct(measurement_id)) %>% ungroup() %>% 
+  prettify_kable()
+```
+
+```{r transferritin_ct_lic_1, echo= FALSE, message=FALSE}
+transferritin_tbl_lic <- transferritin_tbl_lic  %>% 
+# "Iron saturation [Mass Fraction] in Serum or Plasma" , "Transferrin saturation"
+  filter(measurement_concept_name %in% c("Iron/Transferrin [Mass Ratio] in Serum or Plasma")) %>%
+  filter(value_as_number <= 100) %>%
+  group_by(person_id) %>%
+  slice_max(measurement_date, n = 1, with_ties = FALSE) %>%
+  ungroup() %>%
+  select(lic_level_pre_transplant = LIC_level_1_binary, 
+        lic_pre_transplant = LIC_1, 
+        transferrin_sat_perc = value_as_number,
+        measurement_concept_name,
+        scd_type) 
+
+transferritin_tbl_lic %>% 
+    select(-scd_type) %>% arrange(lic_level_pre_transplant) %>%
+    prettify_kable()
+
+plot_title_text_size <- 10
+axis_text_size <- 4
+
+transferritin_tbl_lic %>% ggplot(aes(x = transferrin_sat_perc, y = lic_pre_transplant)) +
+  geom_point(color = "black", size = 3.5, alpha = 0.6) + # Scatter points
+  geom_smooth(method = "lm", se = FALSE, color = "red", linetype = "dashed") + # Regression line
+  stat_regline_equation(label.x = 75, label.y = 10, aes(label = ..eq.label..), 
+                        size = 6) + # Equation
+  stat_regline_equation(label.x = 75, # R-squared
+                        label.y = 12, 
+                        aes(label = paste(..rr.label..)), 
+                        parse = TRUE, # Enables proper superscript
+                        size = 6) + # Increase text size
+  labs(title = "LIC vs. Transferrin Saturation Correlation",
+       y = "LIC (mg Fe/g dry wt)",
+       x = "Transferrin Saturation (%)") +
+  # ylim(0, 60) +
+  theme(plot.title = element_text(size = plot_title_text_size),    # Title text size
+    axis.title.x = element_text(size = axis_text_size), # X-axis title size
+    axis.title.y = element_text(size = axis_text_size), # Y-axis title size
+    axis.text.x = element_text(size = axis_text_size),  # X-axis labels size
+    axis.text.y = element_text(size = axis_text_size)   # Y-axis labels size
+  ) + theme_classic()
+```
+
+- Grouping by disease type: 
+```{r transferritin_ct_lic_2, echo= FALSE, message=FALSE}
+transferritin_tbl_lic %>% 
+  group_by(scd_type) %>%
+  summarise(n_persons = n(), 
+            min_transferrin_sat = min(transferrin_sat_perc),
+            median_transferrin_sat = median(transferrin_sat_perc), 
+            max_transferrin_sat = max(transferrin_sat_perc),
+            min_lic = min(lic_pre_transplant),
+            median_lic = median(lic_pre_transplant),
+            max_lic = max(lic_pre_transplant)) %>%
+  prettify_kable()
+```
+
+- Grouping by disease type and pre-transplant LIC levels:
+```{r transferritin_ct_lic_3, echo= FALSE, message=FALSE}
+transferritin_tbl_lic %>% 
+  group_by(lic_level_pre_transplant, scd_type) %>%
+  summarise(n_persons = n(), 
+            min_transferrin_sat = min(transferrin_sat_perc),
+            median_transferrin_sat = median(transferrin_sat_perc), 
+            max_transferrin_sat = max(transferrin_sat_perc),
+            min_lic = min(lic_pre_transplant),
+            median_lic = median(lic_pre_transplant),
+            max_lic = max(lic_pre_transplant)) %>%
+  prettify_kable()
+```
+
+# Bacteria name for bacteremia status
+- Summary of all bacteremia data and counts grouped by pre-transplant ferritin levels 
+```{r bacteria_summ, echo= FALSE, message=FALSE}
+bacteremia_tbl <- results_tbl("covar_bacteremia_dx") %>% 
+    mutate(bacteria_name = case_when(grepl("Enterobacter", organism_concept_name, ignore.case = TRUE) ~ "Enterobacter",
+                                    grepl("Escherichia coli", organism_concept_name, ignore.case = TRUE) ~ "Escherichia coli",
+                                    grepl("Staphylococcus", organism_concept_name, ignore.case = TRUE) ~ "Staphylococcus (including MRSA/MSSA)",
+                                    grepl("Streptococcus", organism_concept_name, ignore.case = TRUE) ~ "Streptococcus & Related Genera",
+                                    grepl("Salmonella", organism_concept_name, ignore.case = TRUE) ~ "Salmonella",
+                                    grepl("Enterococcus", organism_concept_name, ignore.case = TRUE) ~ "Enterococcus",
+                                    grepl("Corynebacterium|Coryneform|Bacillus|Clostridium|Actinomyces|Cutibacterium acnes", organism_concept_name, ignore.case = TRUE) ~ "Gram-Positive Bacilli",
+                                    grepl("Acinetobacter|Achromobacter xylosoxidans|Rhizobium|Agrobacterium group|Klebsiella pneumoniae|
+                                    Stenotrophomonas maltophilia|Citrobacter freundii|Enterobacter cloacae complex|
+                                    Non-lactose fermenting gram-negative bacillus|Lactose fermenter|Pseudomonas oryzihabitans|
+                                    putida|Pseudomonas fluorescens|Pseudomonas aeruginosa|Pseudomonas species not aeruginosa|
+                                    Haemophilus influenzae|Serratia marcescens|Pantoea|Burkholderia gladioli|Citrobacter amalonaticus|
+                                    Gram-negative bacillus", organism_concept_name, ignore.case = TRUE) ~ "Gram-Negative Bacilli",
+                                    grepl("Gram-negative coccus|Moraxella catarrhalis|Neisseria", organism_concept_name, ignore.case = TRUE) ~ "Gram-negative cocci",
+                                    TRUE ~ "Unspecified (no matching concept name)")) 
+                                    
+bacteremia_tbl %>%
+    group_by(bacteria_name) %>%       
+    summarise(n = n_distinct(person_id)) %>%
+    prettify_kable()
+
+stat_dataset_bac %>% 
+    select(person_id, ferritin_pre, transplant_date) %>%
+    left_join(bacteremia_tbl %>% 
+            select(person_id, bacteria_name, bacteremia_date), by = "person_id") %>%
+    filter(bacteremia_date >= transplant_date) %>%
+    collect() %>% 
+    mutate(ferritin_pre = factor(ferritin_pre, levels = c("low-moderate", "high"))) %>%
+    group_by(person_id) %>%
+    slice_min(bacteremia_date, n = 1, with_ties = FALSE) %>%
+    ungroup() %>% group_by(ferritin_pre, bacteria_name) %>%
+    summarise(n = n_distinct(person_id)) %>% ungroup() %>%
+    pivot_wider(names_from = ferritin_pre, values_from = n, values_fill = 0) %>% 
+    prettify_kable()
+```

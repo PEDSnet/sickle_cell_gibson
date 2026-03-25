@@ -1,0 +1,61 @@
+concept_id,concept_name,concept_code,vocabulary_id
+1333361,10 ML busulfan 6 MG/ML Injection,253113,RxNorm
+1333372,10 ML busulfan 6 MG/ML Injection [Busulfex],284425,RxNorm
+1312708,1 ML alemtuzumab 30 MG/ML Injection,828265,RxNorm
+1312709,1 ML alemtuzumab 30 MG/ML Injection [Campath],828267,RxNorm
+35605490,2 ML fludarabine phosphate 25 MG/ML Injection,1740865,RxNorm
+702598,5 ML cyclophosphamide 200 MG/ML Injection,2568661,RxNorm
+1312706,alemtuzumab,117055,RxNorm
+46275830,alemtuzumab 30 MG/ML Injection,1656634,RxNorm
+1333357,busulfan,1828,RxNorm
+1333359,busulfan 2 MG Oral Tablet,197422,RxNorm
+19007232,busulfan 2 MG Oral Tablet [Myleran],105551,RxNorm
+1310317,cyclophosphamide,3002,RxNorm
+35606514,cyclophosphamide 1000 MG Injection,1734919,RxNorm
+35606516,cyclophosphamide 2000 MG Injection,1734921,RxNorm
+37002349,cyclophosphamide 200 MG/ML Injectable Solution,2386859,RxNorm
+43560510,cyclophosphamide 25 MG Oral Capsule,1437968,RxNorm
+1310318,cyclophosphamide 25 MG Oral Tablet,197549,RxNorm
+19044346,cyclophosphamide 25 MG Oral Tablet [Cytoxan],210570,RxNorm
+35606512,cyclophosphamide 500 MG Injection,1734917,RxNorm
+43560511,cyclophosphamide 50 MG Oral Capsule,1437969,RxNorm
+19018903,cyclophosphamide 50 MG Oral Tablet,197550,RxNorm
+19044589,cyclophosphamide 50 MG Oral Tablet [Cytoxan],210639,RxNorm
+19007236,cyclophosphamide 50 MG Oral Tablet [Endoxana],105555,RxNorm
+46275040,cyclophosphamide anhydrous,1545988,RxNorm
+40028476,cyclophosphamide Injectable Solution,376666,RxNorm
+43560512,cyclophosphamide Oral Capsule,1437967,RxNorm
+40028481,cyclophosphamide Oral Tablet,371664,RxNorm
+1395557,fludarabine,24698,RxNorm
+40168352,fludarabine phosphate 10 MG Oral Tablet [Oforta],877490,RxNorm
+35605489,fludarabine phosphate 50 MG Injection,1740864,RxNorm
+1377141,hydroxyurea,5552,RxNorm
+1377170,hydroxyurea 1000 MG Oral Tablet,283475,RxNorm
+963938,hydroxyurea 1000 MG Oral Tablet [Siklos],1999316,RxNorm
+963930,hydroxyurea 100 MG Oral Tablet,1999308,RxNorm
+963936,hydroxyurea 100 MG Oral Tablet [Siklos],1999314,RxNorm
+19023560,hydroxyurea 200 MG Oral Capsule,200342,RxNorm
+1377167,hydroxyurea 200 MG Oral Capsule [Droxia],213282,RxNorm
+19023561,hydroxyurea 300 MG Oral Capsule,200343,RxNorm
+1377168,hydroxyurea 300 MG Oral Capsule [Droxia],213283,RxNorm
+19023562,hydroxyurea 400 MG Oral Capsule,200344,RxNorm
+1377169,hydroxyurea 400 MG Oral Capsule [Droxia],213284,RxNorm
+1377163,hydroxyurea 500 MG Oral Capsule,197797,RxNorm
+19007385,hydroxyurea 500 MG Oral Capsule [Hydrea],105602,RxNorm
+40051647,hydroxyurea Oral Capsule,370658,RxNorm
+40051649,hydroxyurea Oral Capsule [Hydrea],366743,RxNorm
+40051650,hydroxyurea Oral Tablet,370657,RxNorm
+1301267,melphalan,6718,RxNorm
+1301270,melphalan 2 MG Oral Tablet,197919,RxNorm
+1301292,melphalan 50 MG Injection,311487,RxNorm
+40168052,melphalan 50 MG Injection [Alkeran],876399,RxNorm
+35603555,melphalan 50 MG Injection [Evomela],1745090,RxNorm
+35605679,melphalan Injection,1740949,RxNorm
+19137385,thiotepa,10473,RxNorm
+46275907,thiotepa 100 MG Injection,1660004,RxNorm
+1594018,thiotepa 100 MG Injection [Tepadina],1919209,RxNorm
+19079744,thiotepa 10.4 MG/ML Injectable Solution,313360,RxNorm
+46275912,thiotepa 15 MG Injection,1660009,RxNorm
+1594020,thiotepa 15 MG Injection [Tepadina],1919211,RxNorm
+40085816,thiotepa Injectable Solution,375319,RxNorm
+19063623,treosulfan 50 MG/ML Injectable Solution,250758,RxNorm

@@ -1,0 +1,24 @@
+concept_id,concept_name,concept_code,vocabulary_id
+3043744,Bilirubin.conjugated+indirect [Mass/volume] in Serum or Plasma,33898-8,LOINC
+3019676,Bilirubin.conjugated [Mass/volume] in Serum or Plasma,15152-2,LOINC
+3003469,Bilirubin crystals [#/area] in Urine sediment by Microscopy high power field,25146-2,LOINC
+3045524,Bilirubin direct and total panel [Mass/volume] - Serum or Plasma,34543-9,LOINC
+3021194,Bilirubin.direct [Mass/volume] in Body fluid,14152-3,LOINC
+3027597,Bilirubin.direct [Mass/volume] in Serum or Plasma,1968-7,LOINC
+4216632,"Bilirubin, direct measurement",39748002,SNOMED
+3007359,Bilirubin.indirect [Mass/volume] in Serum or Plasma,1971-1,LOINC
+40762034,Bilirubin [Mass/volume] in Skin,58941-6,LOINC
+4118986,Bilirubin measurement,302787001,SNOMED
+4230546,"Bilirubin measurement, urine",359992002,SNOMED
+4018181,"Bilirubin, non-glucuronidated measurement",104553007,SNOMED
+40761551,Bilirubin [Presence] in Urine by Confirmatory method,58450-8,LOINC
+3028193,Bilirubin.total [Mass/volume] in Body fluid,1974-5,LOINC
+3024128,Bilirubin.total [Mass/volume] in Serum or Plasma,1975-2,LOINC
+3040519,Bilirubin.total [Mass/volume] in Urine by Automated test strip,53327-3,LOINC
+3006513,Bilirubin.total [Mass/volume] in Urine by Test strip,20505-4,LOINC
+4230543,"Bilirubin, total measurement",359986008,SNOMED
+3036768,Bilirubin.total [Moles/volume] in Specimen,32303-0,LOINC
+3011258,Bilirubin.total [Presence] in Urine,1977-8,LOINC
+3030477,Bilirubin.total [Presence] in Urine by Automated test strip,50551-1,LOINC
+3018834,Bilirubin.total [Presence] in Urine by Test strip,5770-3,LOINC
+44787077,Bilirubin.total/Total in Stone by Infrared spectroscopy,74434-2,LOINC

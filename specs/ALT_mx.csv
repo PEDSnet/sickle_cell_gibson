@@ -1,0 +1,5 @@
+concept_id,concept_name,concept_code,vocabulary_id
+3006923,Alanine aminotransferase [Enzymatic activity/volume] in Serum or Plasma,1742-6,LOINC
+3005755,Alanine aminotransferase [Enzymatic activity/volume] in Serum or Plasma by With P-5'-P,1743-4,LOINC
+3000784,Alanine aminotransferase [Enzymatic activity/volume] in Body fluid,25302-1,LOINC
+4146380,Alanine aminotransferase measurement,34608000,SNOMED

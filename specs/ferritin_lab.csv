@@ -1,0 +1,28 @@
+concept_id,concept_code,concept_name,vocabulary_id
+3010424,14723-1,Ferritin [Moles/volume] in Serum or Plasma,LOINC
+3014636,14724-9,Ferritin [Interpretation] in Blood,LOINC
+3015242,20567-4,Ferritin [Mass/volume] in Serum or Plasma by Immunoassay,LOINC
+3001122,2276-4,Ferritin [Mass/volume] in Serum or Plasma,LOINC
+3011961,24373-3,Ferritin [Mass/volume] in Blood,LOINC
+3032099,35209-6,Ferritin [Mass or Moles/volume] in Serum or Plasma,LOINC
+40654802,LG43688-7,Ferritin|Moment in time|Serum or Plasma,LOINC
+40652982,LG6299-4,"Ferritin|Mass Concentration|Moment in time|Blood, Serum or Plasma",LOINC
+40772593,LP15568-6,Ferritin,LOINC
+37047221,LP385080-9,Ferritin | Blood | Chemistry - non-challenge,LOINC
+37070654,LP385083-3,Ferritin | Serum or Plasma | Chemistry - non-challenge,LOINC
+40796615,LP43619-3,Ferritin | Bld-Ser-Plas,LOINC
+37208752,1108601000000104,Ferritin mass concentration in plasma,SNOMED
+37208753,1108611000000102,Ferritin mass concentration in serum,SNOMED
+40302346,143032003,Serum ferritin level,SNOMED
+40332996,165625001,Serum (& level): [ferritin] or [TIBC]),SNOMED
+4148588,269821003,Serum ferritin measurement,SNOMED
+4076928,275759006,Serum ferritin/TIBC measurement,SNOMED
+3550567,39881000000100,Plasma ferritin level,SNOMED
+4269044,401152007,Plasma ferritin measurement,SNOMED
+3550658,42191000000104,Plasma ferritin level,SNOMED
+3550754,44271000000101,Plasma ferritin level,SNOMED
+3575769,46861000000101,Plasma ferritin level,SNOMED
+4176561,489004,Ferritin measurement,SNOMED
+3550998,79801000000108,Plasma ferritin level,SNOMED
+37397877,992911000000107,Plasma ferritin level,SNOMED
+37397915,993381000000106,Serum ferritin level,SNOMED

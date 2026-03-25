@@ -1,0 +1,345 @@
+---
+title: "Gibson's Iron Overload in Sickle Cell Patients - Feasibility Summary"
+author: "Nhat Nguyen \n PEDSnet Coordinating Center"
+date: "`r format(Sys.time(), '%B %d, %Y')`"
+format:
+  html:
+    page-layout: full
+    embed-resources: true
+    smooth-scroll: true
+    fig-cap: TRUE
+    df-print: paged
+    toc: TRUE
+    toc-depth: 5
+    toc-collapsed: TRUE
+    toc-float: TRUE
+    toc-location: left
+    number-sections: TRUE
+    number-depth: 3
+    output-file: gibson_sickle_cell_Ver2
+    output-ext: "html"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, message = FALSE, warning = FALSE, fig.width = 10, fig.height = 6, fig.align = "center")
+# Default taken from R notebook behavior: when knitting, wd will always be location of notebook
+base_dir <- '..'
+Sys.setenv(PEDSNET_SKIP_REQUEST_EXECUTION=1)
+tryCatch(source('../site/run.R'),
+         error = function (e) message(e)) # May not be able to make db connection
+
+# Set to "local" to read data from ../results, or another value to read from db
+data_source <- "local" #if_else(config('execution_mode') == 'distribution', 'local', 'not_local')
+
+require(tidyr)
+require(knitr)
+require(kableExtra)
+require(stringr)
+require(tibble)
+require(ggplot2)
+
+```
+
+```{r funtioncs, include=FALSE}
+get_codesets <- function(codeset_name) {
+  read_csv(paste0('../specs/', codeset_name, '.csv'), col_types = c('c', 'c', 'c', 'c'), show_col_types = FALSE) %>%
+  mutate(concept_id = as.character((concept_id)), concept_code = as.character((concept_code))) %>% collect()
+}
+
+get_results <- function(tbl_name) {
+  if (data_source == 'local') {
+    rslt <- read.csv(paste0('../local/', tbl_name, '.csv'))
+  }
+  else {
+    rslt <- results_tbl(tbl_name) %>% collect()
+  }
+  rslt
+}
+
+prettify_kable <- function(data) {
+  rslt <- data %>% kable(digits = 4, format.args = list(big.mark = ','))
+  if (knitr::is_html_output()) rslt <- rslt %>%
+      kable_styling(bootstrap_options = c("striped", "hover")) %>%
+      column_spec(1, bold = T, border_right = T)
+  rslt
+}
+
+```
+
+```{r data, include= FALSE}
+cohort_2a_1 <- get_results('aim_2a_1')
+cohort_2a_2 <- get_results('aim_2a_2')
+cohort_2b_1 <- get_results('aim_2b_1')
+cohort_2b_2 <- get_results('aim_2b_2')
+cohort_3_1 <- get_results('aim_3_1')
+cohort_3_2 <- get_results('aim_3_2')
+
+cohort_all <- cohort_2a_1 %>% mutate(cohort = "aim 2a.1") %>% select(person_id, cohort, transplant_site, age_at_transplant, gender, scd_type, scd_concept_id, scd_concept_name, transplant_concept_id, transplant_concept_name, transplant_type) %>%
+                bind_rows(cohort_2a_2 %>% mutate(cohort = "aim 2a.2") %>% select(person_id, cohort, transplant_site, age_at_transplant, gender, scd_concept_id, scd_concept_name, scd_type, transplant_concept_id, transplant_concept_name, transplant_type)) %>% 
+                bind_rows(cohort_2b_1 %>% mutate(cohort = "aim 2b.1") %>% select(person_id, cohort, transplant_site, age_at_transplant, gender, scd_concept_id, scd_concept_name, scd_type, transplant_concept_id, transplant_concept_name, transplant_type)) %>% 
+                bind_rows(cohort_2b_2 %>% mutate(cohort = "aim 2b.2") %>% select(person_id, cohort, transplant_site, age_at_transplant, gender, scd_concept_id, scd_concept_name, scd_type, transplant_concept_id, transplant_concept_name, transplant_type)) %>% 
+                bind_rows(cohort_3_1 %>% mutate(cohort = "aim 3.1") %>% select(person_id, cohort, transplant_site, age_at_transplant, gender, scd_concept_id, scd_concept_name, scd_type, transplant_concept_id, transplant_concept_name, transplant_type)) %>% 
+                bind_rows(cohort_3_2 %>% mutate(cohort = "aim 3.2") %>% select(person_id, cohort, transplant_site, age_at_transplant, gender, scd_concept_id, scd_concept_name, scd_type, transplant_concept_id, transplant_concept_name, transplant_type))
+```
+
+The data presented here are the results of a feasbility evaluation performed by the PEDSnet data and analytic coordinating center. Because feasibility queries require efficient completion, they entail less consultation regarding study design, resource allocation, and data quality analysis than full study execution, feasibility results may incompletely predict observations made during the study.
+
+# Request Description
+
+This is a feasibility report with patient counts for different aims of the study along with the site information and their demography. Nhat and Nora will continue working on refining the codesets and data analysis plan.
+
+## Confidentiality
+
+Please treat the contents of this report as confidential, and do not redistrubute beyond PEDSnet staff and the requester.
+
+## Request Information
+
+```{r echo=FALSE, message=FALSE, warning=FALSE, paged.print=FALSE}
+tribble( ~Item, ~Value,
+         'Title', config('title'),
+         'Requester', config('requester_name'),
+         'CDM Version', as.character(config('cdm_version')),
+         'Request Version', as.character(config('req_version'))) %>%
+  prettify_kable()
+
+```
+
+# Cohort Definition
+
+-   **Time Anchors:** The specific details of cohort formation are described below. Note that for dates, we use notation to indicate time, where 0 refers to the day that a patient enters the cohort, a positive integer refers to the number of days after the cohort entrance that the observation period lasts, a negative interger refers to the number of days before the cohort entrance that the observation period lasts, oo refers to the end of the study period, and -oo refers to the beginning of the study period.
+-   **Study period:** 1/1/2010 – 6/30/2023
+-   **Cohort entrance date:** Date of first transplant
+-   **Follow-up window:** 
+    - [-365, 00]: interval during which outcome(s) of interest may be included in the analysis.
+    - Exposures of interest (LIC, ferritin) for Aims 2a can be observed from -365 days to 0.
+    - Exposures of interest (LIC, ferritin) for Aims 2b and 3 can be observed from day +90 to +365.
+    - Exposures of interest (deferasirox or deferoxamine prescription, phlebotomy procedure) for Aim 3 can be observed from day +90 to 00. 
+    - Outcomes of interest for Aim 2a can be observed from day 0 to 00 
+    - Outcomes of interest for Aim 2b can be observed from date of post-transplant LIC or ferritin to 00. 
+    - Outcomes of interest for Aim 3 can be observed from date of prescription of deferasirox or deferoxamine to 00, or date of first phlebotomy to 00
+-   **Inclusion/exclusion criteria:** 
+    - Aim 1: Pre-HSCT iron overload: Exclude patients who do not have either a pre-HSCT ferritin or LIC. Post-HSCT iron overload: exclude patients who do not have an LIC or ferritin 6-12 months after HSCT. 
+    - Aim 2a: Include patients whose first transplant between 1/1/2010 – 6/30/2023. Exclude patients who do not have either a pre-HSCT ferritin or LIC. 
+    - Aim 2b and 3: Include patients whose first transplant between 1/1/2010 – 12/1/2022. Exclude patients who do not have an LIC or ferritin 6-12 months after HSCT. 
+    - Aim 3: Exclude patients who did not require post-transplant chelation or phlebotomy.
+
+# Conditions and Procedure Codesets:
+
+-   A compehensive code search was performed for all the conditions, procedures, and measurements specified in the DAP.
+
+-   This report includes PEDSnet's proposed codesets, with further input from Nora for refinements.
+
+## Non-malignant sickle sell diseases: 
+```{r scd_codeset}
+  scd_id <- get_codesets("scd_dx") %>% mutate(scd_type = "scd") #sickle cell disease, n = 35
+  beta_thal_id <- get_codesets("beta_thal_major_dx") %>% mutate(scd_type = "btm") #beta thalassemia major, n = 9
+  aplastic_anemia_id <- get_codesets("aplastic_anemia_dx") %>% mutate(scd_type = "aa")  #aplastic anemia, n = 27
+  diamond_blackfan_id <- get_codesets("diamond_blackfan_anemia_dx") %>% mutate(scd_type = "dba") 
+  scd_id %>% union(beta_thal_id) %>% 
+  union(aplastic_anemia_id) %>% 
+  union(diamond_blackfan_id) %>%
+  mutate(concept_id = as.character((concept_id)), concept_code = as.character((concept_code))) %>%
+  prettify_kable()
+```
+
+## Abdominal or Liver MRI codeset: 
+- check for unique code
+
+```{r mri_codeset}
+  get_codesets("mri_px") %>% prettify_kable()
+```
+
+## Stem-cell transplant codeset:
+```{r transplant_codeset}
+  get_codesets("transplant_px") %>% 
+    mutate(transplant_type = case_when(grepl("allogeneic", concept_name, ignore.case = TRUE) ~ "allogeneic",
+                                       grepl("autologous", concept_name, ignore.case = TRUE) ~ "autologous",
+                                       TRUE ~ "other")) %>% prettify_kable()
+```
+
+## Ferritin measurement codeset:
+```{r ferritin_codeset}
+  get_codesets("ferritin_lab") %>% prettify_kable()
+```
+
+## Phlebotomy codeset:
+```{r phleb_codeset}
+  get_codesets("therapeutic_phleb_px") %>% prettify_kable()
+```
+
+## Deferasirox or deferoxamine codeset:
+```{r drugs_codeset}
+  get_codesets("deferoxamine_rx") %>% mutate(drug_type = "deferoxamine") %>%
+  union(get_codesets("deferasirox_rx") %>% mutate(drug_type = "deferasirox")) %>%
+  union(get_codesets("deferiprone_rx") %>% mutate(drug_type = "deferiprone")) %>%
+  prettify_kable()
+```
+
+# Result Summary
+
+The cohort comprises `r summarise(cohort_all, ct = n_distinct(person_id)) %>% pull(ct)` patients from `r summarise(cohort_all, ct = n_distinct(transplant_site)) %>% pull(ct)` PEDSnet sites.
+
+## Site stratification
+```{r site_strat}
+  ct <- cohort_all %>% ungroup() %>% distinct(person_id) %>% count() %>% pull(n)
+  cohort_all %>% group_by(transplant_site) %>%
+  mutate(persons = n_distinct(person_id)) %>% group_by(transplant_site, cohort) %>% 
+    summarize(cohort_size = n_distinct(person_id), total = unique(persons)) %>% 
+    mutate(cohort_size = if_else(cohort_size < 11L, "<11", as.character(cohort_size))) %>%
+  pivot_wider(names_from = cohort, values_from = cohort_size) %>% 
+  select(1, 3:8, 2) %>% mutate(perc = round(total/ct*100, 2)) %>% 
+  rename(site = transplant_site) %>%
+  prettify_kable()
+```
+
+## Attrition
+
+```{r attrition, echo=FALSE}
+  cohort_2a_1 %>% mutate(cohort = "Aim 2a.1") %>% select(person_id, cohort) %>%
+                bind_rows(cohort_2a_2 %>% mutate(cohort = "Aim 2a.2") %>% select(person_id, cohort)) %>% 
+                bind_rows(cohort_2b_1 %>% mutate(cohort = "Aim 2b.1") %>% select(person_id, cohort)) %>% 
+                bind_rows(cohort_2b_2 %>% mutate(cohort = "Aim 2b.2") %>% select(person_id, cohort)) %>% 
+                bind_rows(cohort_3_1 %>% mutate(cohort = "Aim 3.1") %>% select(person_id, cohort)) %>% 
+                bind_rows(cohort_3_2 %>% mutate(cohort = "Aim 3.2") %>% select(person_id, cohort)) %>% 
+                group_by(cohort) %>% 
+                summarise(persons = n_distinct(person_id)) %>% 
+                mutate(persons = if_else(persons<11, "<11", as.character(persons))) %>%
+                prettify_kable()
+
+
+
+
+# DBI doesn't have a good way to interrogate tables in a specified schema,
+# so you have to list the step logs you want to summarise (e.g. DCC + remote
+# sites).
+# step_log <- list(config('qry_site')) %>%
+#   map(.f = function(x) {
+#     get_results(paste0(x, '_steps'))
+#   }) %>%
+#   reduce(.f = dplyr::union)
+# 
+# step_log %>%
+#   arrange(stamp) %>%
+#   select(cohort, persons) %>%
+#   mutate(persons = if_else(persons > 0L & persons < 11L,
+#                            as.integer(NA), as.integer(persons))) %>%
+#   mutate(percent_prior = round(100 * persons /
+#                                  coalesce(lag(persons), persons), 2)) %>%
+#   prettify_kable()
+```
+
+## Demographics
+
+```{r demog, echo=FALSE}
+
+cohort_all %>% group_by(gender) %>% summarise(persons = n_distinct(person_id)) %>% 
+            mutate(perc = paste0(round(persons/ct*100, 2), " %")) %>% prettify_kable()
+
+cohort_all %>% mutate(age_group = case_when(age_at_transplant < 5 ~ "[0, 5)",
+                                            age_at_transplant < 10 ~ "[5, 10)",
+                                            age_at_transplant < 15 ~ "[10, 15)",
+                                            age_at_transplant < 20 ~ "[15, 20)",
+                                            age_at_transplant < 40 ~ "[20, 40)",
+                                            TRUE ~ "40+")) %>% 
+               group_by(age_group, gender) %>% 
+               summarise(persons = n_distinct(person_id)) %>%
+               pivot_wider(names_from = gender, values_from = persons) %>% 
+               mutate(F_perc = paste0(round(F/ct*100, 2), "%"),
+                      M_perc = paste0(round(M/ct*100, 2), "%"),
+                      F = if_else(F<11, "<11", as.character(F)),
+                      M = if_else(M<11, "<11", as.character(M))) %>%
+               slice(1, 4, 5, 2, 3) %>% select(age_group, Female = F, F_perc, Male = M, M_perc) %>% 
+               prettify_kable()
+
+# c_names <- vocabulary_tbl('concept') %>%
+#   filter(domain_id %in% c('Gender', 'Race', 'Ethnicity')) %>%
+#   select(concept_id, concept_name) %>% collect()
+# 
+# demog <- cdm_tbl('person') %>%
+#   semi_join(distinct(cohort, person_id),
+#             by = 'person_id', copy = TRUE) %>% collect() %>%
+#   inner_join(select(c_names, concept_id, sex = concept_name),
+#              by = c('gender_concept_id' = 'concept_id')) %>%
+#   inner_join(select(c_names, concept_id, race = concept_name),
+#              by = c('race_concept_id' = 'concept_id')) %>%
+#   inner_join(select(c_names, concept_id, hispanic = concept_name),
+#              by = c('ethnicity_concept_id' = 'concept_id')) %>%
+#   select(person_id, sex, race, hispanic)
+# 
+# h_cts <- demog %>% group_by(sex, hispanic) %>% summarise(persons = n()) %>%
+#   mutate(persons = if_else(persons > 0L & persons < 11L,
+#                            as.integer(NA), as.integer(persons))) %>%
+#   pivot_wider(names_from = sex, values_from = persons) %>% rename(group = hispanic)
+# r_cts <- demog %>% group_by(sex, race) %>% summarise(persons = n()) %>%
+#   mutate(persons = if_else(persons > 0L & persons < 11L,
+#                            as.integer(NA), as.integer(persons))) %>%
+#   pivot_wider(names_from = sex, values_from = persons) %>% rename(group = race)
+# 
+# prettify_kable(r_cts)
+# prettify_kable(h_cts)
+
+```
+
+## Sample Counts by Codesets:
+
+The below tables only showed the top most frequent codesets. 
+
+### Non-malignant sickle cell dieases
+```{r codeset_ct_scd, echo = FALSE}
+    cohort_all %>% group_by(scd_concept_id, scd_concept_name, scd_type) %>% summarise(persons = n_distinct(person_id)) %>% 
+    ungroup() %>%
+    arrange(desc(persons)) %>% 
+    mutate(scd_concept_id = as.character(scd_concept_id), 
+            scd_concept_name = as.character(scd_concept_name),
+            persons = if_else(persons < 11, "<11", as.character(persons))) %>% 
+    slice_head(n = 15) %>% prettify_kable()
+```
+### Steam cell transplants
+```{r codeset_ct_transplant, echo = FALSE}
+    cohort_all %>% group_by(transplant_concept_id, transplant_concept_name, transplant_type) %>% summarise(persons = n_distinct(person_id)) %>% 
+    ungroup() %>%
+    arrange(desc(persons)) %>% 
+    mutate(transplant_concept_id = as.character(transplant_concept_id), 
+            transplant_concept_name = as.character(transplant_concept_name),
+            persons = if_else(persons < 11, "<11", as.character(persons))) %>% 
+    slice_head(n = 15) %>% prettify_kable()
+```
+### MRI
+```{r codeset_ct_mri, echo = FALSE}
+    cohort_2a_1 %>% union(cohort_2b_1) %>%
+      group_by(mri_concept_id, mri_concept_name) %>%
+      summarise(persons = n_distinct(person_id)) %>%
+      arrange(desc(persons)) %>%
+      mutate(persons = if_else(persons < 11, "<11", as.character(persons)),
+            mri_concept_id = as.character(mri_concept_id)) %>%
+      prettify_kable()
+```
+### Therapeutic phlebotomy
+```{r codeset_ct_phleb, echo = FALSE}
+    cohort_3_1 %>% 
+      group_by(phleb_concept_id, phleb_concept_name) %>%
+      summarise(persons = n_distinct(person_id)) %>%
+      arrange(desc(persons)) %>%
+      mutate(persons = if_else(persons < 11, "<11", as.character(persons)),
+            phleb_concept_id = as.character(phleb_concept_id)) %>%
+      prettify_kable()
+```
+### Drugs
+```{r codeset_ct_drugs, echo = FALSE}
+    cohort_3_2 %>% 
+      group_by(drug_type) %>%
+      summarise(persons = n_distinct(person_id)) %>%
+      arrange(desc(persons)) %>%
+      mutate(persons = if_else(persons < 11, "<11", as.character(persons))) %>%
+      prettify_kable()
+
+    cohort_3_2 %>% 
+      # filter( == "deferoxamine") %>% 
+      group_by(drug_type, drug_concept_id, drug_concept_name) %>%
+      summarise(persons = n_distinct(person_id)) %>%
+      # arrange(desc(persons)) %>%
+      slice_max(persons, n = 10, with_ties = TRUE) %>%
+      mutate(persons = if_else(persons < 11, "<11", as.character(persons)),
+            drug_concept_id = as.character(drug_concept_id)) %>%
+      prettify_kable()
+```

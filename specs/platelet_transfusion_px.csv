@@ -1,0 +1,13 @@
+concept_id,concept_name,concept_code,vocabulary_id
+4130829,Platelet transfusion,12719002,SNOMED
+2788978,"Transfusion of Autologous Platelets into Central Vein, Percutaneous Approach",30243R0,ICD10PCS
+2788722,"Transfusion of Autologous Platelets into Peripheral Vein, Percutaneous Approach",30233R0,ICD10PCS
+2789483,"Transfusion of Nonautologous Platelets into Central Artery, Percutaneous Approach (Deprecated)",30263R1,ICD10PCS
+2788946,"Transfusion of Nonautologous Platelets into Central Vein, Open Approach",30240R1,ICD10PCS
+2788979,"Transfusion of Nonautologous Platelets into Central Vein, Percutaneous Approach",30243R1,ICD10PCS
+2789198,"Transfusion of Nonautologous Platelets into Peripheral Artery, Open Approach (Deprecated)",30250R1,ICD10PCS
+2789230,"Transfusion of Nonautologous Platelets into Peripheral Artery, Percutaneous Approach (Deprecated)",30253R1,ICD10PCS
+2788690,"Transfusion of Nonautologous Platelets into Peripheral Vein, Open Approach",30230R1,ICD10PCS
+2788723,"Transfusion of Nonautologous Platelets into Peripheral Vein, Percutaneous Approach",30233R1,ICD10PCS
+2785933,"Transfusion of Nonautologous Platelets into Products of Conception, Circulatory, Percutaneous Approach",30273R1,ICD10PCS
+2008239,Transfusion of platelets,99.05,ICD9Proc

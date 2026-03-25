@@ -1,0 +1,49 @@
+concept_id,concept_name,concept_code,vocabulary_id
+3018064,CD3 cells/100 cells in Bone marrow,32529-0,LOINC
+3029895,CD3+CD4+ (T4 helper) cells/100 cells in Tissue,51300-2,LOINC
+40760513,CD4+CD8+ cells/100 cells in Body fluid,57401-2,LOINC
+3030435,CD3 cells/100 cells in Tissue,51273-1,LOINC
+42870521,Lymphocyte proliferation stimulated by pokeweed mitogen/CD3 in Blood by Flow cytometry (FC),69020-6,LOINC
+21494814,CD8 cells/100 lymphocytes in Specimen,80222-3,LOINC
+40771540,Lymphocyte proliferation.Candida albicans.maximum/CD3 in Blood by Flow cytometry (FC),69015-6,LOINC
+3022533,CD3 cells/100 cells in Blood,8124-0,LOINC
+21493027,Lymphocyte proliferation.Interleukin 2.maximum/CD3 in Blood by Flow cytometry (FC),81757-7,LOINC
+3014686,CD3 cells/100 cells in Specimen,20599-7,LOINC
+4209260,Absolute CD4 count procedure,313660005,SNOMED
+3041598,CD3+CD4+ (T4 helper) cells/100 cells in Bronchial specimen,40623-1,LOINC
+4209239,CD3 T-cell count procedure,313525008,SNOMED
+3033894,CD3 cells/100 cells in Body fluid,17826-9,LOINC
+3041099,Cytoplasmic CD3 cells/100 cells in Cerebral spinal fluid,52884-4,LOINC
+3001694,CD3+CD4+ (T4 helper) cells [#/volume] in Specimen,32515-9,LOINC
+3039590,Cytoplasmic CD3 cells/100 cells in Body fluid,52882-8,LOINC
+3037816,CD4+CD8+ cells/100 cells in Blood,17146-2,LOINC
+3001405,CD3+CD8+ (T8 suppressor) cells [#/volume] in Blood,14135-8,LOINC
+3033899,CD3+CD8+ (T8 suppressor) cells/100 cells in Specimen,32518-3,LOINC
+3045450,CD3+CD4+ (T4 helper) cells/CD3+CD8+ (T8 suppressor cells) cells [# Ratio] in Bronchial specimen,32756-9,LOINC
+21493026,Lymphocyte proliferation.anti-CD3.maximum/CD3 in Blood by Flow cytometry (FC),81756-9,LOINC
+40771551,Lymphocyte proliferation.tetanus toxoid.maximum/CD3 in Blood by Flow cytometry (FC),69029-7,LOINC
+3018724,CD3+CD8+ (T8 suppressor) cells/100 cells in Bone marrow,32535-7,LOINC
+3000739,CD3+CD4+ (T4 helper) cells/100 cells in Specimen,32516-7,LOINC
+3042878,CD3+CD8+ (T8 suppressor) cells/100 cells in Cerebral spinal fluid,43971-1,LOINC
+3014037,CD3+CD4+ (T4 helper) cells/100 cells in Blood,8123-2,LOINC
+4197605,Absolute CD3 count procedure,313447006,SNOMED
+3034689,CD3 cells/100 cells in Cerebral spinal fluid,42193-3,LOINC
+4197606,CD8 percent count,313454000,SNOMED
+4210858,CD4 percent count,313938009,SNOMED
+3040131,CD3+CD8+ (T8 suppressor) cells/100 cells in Bronchial specimen,40624-9,LOINC
+3038601,CD4 stimulated ATP immune response [Mass/volume] in Blood,53939-5,LOINC
+3044838,CD3 cells/100 cells in Bronchial specimen,32752-8,LOINC
+21494815,CD4 cells/100 lymphocytes in Specimen,80223-1,LOINC
+3010993,CD3 cells [#/volume] in Specimen,20598-9,LOINC
+3000683,CD3+CD8+ (T8 suppressor) cells/100 cells in Body fluid,17824-4,LOINC
+3043402,Cytoplasmic CD3 cells/100 cells in Specimen,32857-5,LOINC
+3000646,Cytoplasmic CD3 cells/100 cells in Blood,17216-3,LOINC
+3007449,CD3+CD8+ (T8 suppressor) cells/100 cells in Blood,8101-8,LOINC
+3023029,CD3+CD4+ (T4 helper) cells/100 cells in Bone marrow,32533-2,LOINC
+44807257,CD8 count,816151000000101,SNOMED
+3002870,CD3+CD4+ (T4 helper) cells/100 cells in Body fluid,17822-8,LOINC
+3028167,CD3+CD4+ (T4 helper) cells [#/volume] in Blood,24467-3,LOINC
+3041699,Cytoplasmic CD3 cells/100 cells in Bone marrow,52883-6,LOINC
+21493668,CD4-CD8-/100 CD3+TCR alpha beta+ cells in Blood,80699-2,LOINC
+3041688,Cytoplasmic CD3 cells/100 cells in Tissue,52885-1,LOINC
+3011412,CD3 cells [#/volume] in Blood,8122-4,LOINC

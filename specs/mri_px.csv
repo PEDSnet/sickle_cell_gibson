@@ -1,0 +1,39 @@
+﻿concept_id,concept_name,vocabulary_id,concept_code
+2787931,Magnetic Resonance Imaging (MRI) of Liver and Spleen using Other Contrast,ICD10PCS,BF36YZZ
+2881544,Imaging @ Hepatobiliary System and Pancreas @ Magnetic Resonance Imaging (MRI) @ Liver and Spleen @ None,ICD10PCS,BF36Z
+2894561,Imaging @ Hepatobiliary System and Pancreas @ Magnetic Resonance Imaging (MRI) @ Liver and Spleen @ None @ None,ICD10PCS,BF36ZZ
+2787932,Magnetic Resonance Imaging (MRI) of Liver and Spleen,ICD10PCS,BF36ZZZ
+2792728,"Magnetic Resonance Imaging (MRI) of Abdomen and Pelvis Subcutaneous Tissue using Other Contrast, Unenhanced and Enhanced",ICD10PCS,BH3HY0Z
+2792729,Magnetic Resonance Imaging (MRI) of Abdomen and Pelvis Subcutaneous Tissue using Other Contrast,ICD10PCS,BH3HYZZ
+2792730,Magnetic Resonance Imaging (MRI) of Abdomen and Pelvis Subcutaneous Tissue,ICD10PCS,BH3HZZZ
+2897841,Imaging @ Hepatobiliary System and Pancreas @ Magnetic Resonance Imaging (MRI) @ Liver,ICD10PCS,BF35
+2865844,Imaging @ Hepatobiliary System and Pancreas @ Magnetic Resonance Imaging (MRI) @ Liver @ Other Contrast,ICD10PCS,BF35Y
+2860458,Imaging @ Hepatobiliary System and Pancreas @ Magnetic Resonance Imaging (MRI) @ Liver @ Other Contrast @ Unenhanced and Enhanced,ICD10PCS,BF35Y0
+2787927,"Magnetic Resonance Imaging (MRI) of Liver using Other Contrast, Unenhanced and Enhanced",ICD10PCS,BF35Y0Z
+2814508,Imaging @ Hepatobiliary System and Pancreas @ Magnetic Resonance Imaging (MRI) @ Liver @ Other Contrast @ None,ICD10PCS,BF35YZ
+2787928,Magnetic Resonance Imaging (MRI) of Liver using Other Contrast,ICD10PCS,BF35YZZ
+2809805,Imaging @ Hepatobiliary System and Pancreas @ Magnetic Resonance Imaging (MRI) @ Liver @ None,ICD10PCS,BF35Z
+2873629,Imaging @ Hepatobiliary System and Pancreas @ Magnetic Resonance Imaging (MRI) @ Liver @ None @ None,ICD10PCS,BF35ZZ
+2787929,Magnetic Resonance Imaging (MRI) of Liver,ICD10PCS,BF35ZZZ
+2860459,Imaging @ Hepatobiliary System and Pancreas @ Magnetic Resonance Imaging (MRI) @ Liver and Spleen,ICD10PCS,BF36
+2897842,Imaging @ Hepatobiliary System and Pancreas @ Magnetic Resonance Imaging (MRI) @ Liver and Spleen @ Other Contrast,ICD10PCS,BF36Y
+2881543,Imaging @ Hepatobiliary System and Pancreas @ Magnetic Resonance Imaging (MRI) @ Liver and Spleen @ Other Contrast @ Unenhanced and Enhanced,ICD10PCS,BF36Y0
+2787930,"Magnetic Resonance Imaging (MRI) of Liver and Spleen using Other Contrast, Unenhanced and Enhanced",ICD10PCS,BF36Y0Z
+2854739,Imaging @ Hepatobiliary System and Pancreas @ Magnetic Resonance Imaging (MRI) @ Liver and Spleen @ Other Contrast @ None,ICD10PCS,BF36YZ
+2832897,Imaging @ Anatomical Regions @ Magnetic Resonance Imaging (MRI) @ Abdomen,ICD10PCS,BW30
+2866518,Imaging @ Anatomical Regions @ Magnetic Resonance Imaging (MRI) @ Abdomen @ Other Contrast,ICD10PCS,BW30Y
+2892482,Imaging @ Anatomical Regions @ Magnetic Resonance Imaging (MRI) @ Abdomen @ Other Contrast @ Unenhanced and Enhanced,ICD10PCS,BW30Y0
+2793090,"Magnetic Resonance Imaging (MRI) of Abdomen using Other Contrast, Unenhanced and Enhanced",ICD10PCS,BW30Y0Z
+2866644,Imaging @ Anatomical Regions @ Magnetic Resonance Imaging (MRI) @ Abdomen @ Other Contrast @ None,ICD10PCS,BW30YZ
+2793091,Magnetic Resonance Imaging (MRI) of Abdomen using Other Contrast,ICD10PCS,BW30YZZ
+2866645,Imaging @ Anatomical Regions @ Magnetic Resonance Imaging (MRI) @ Abdomen @ None,ICD10PCS,BW30Z
+2815177,Imaging @ Anatomical Regions @ Magnetic Resonance Imaging (MRI) @ Abdomen @ None @ None,ICD10PCS,BW30ZZ
+2793092,Magnetic Resonance Imaging (MRI) of Abdomen,ICD10PCS,BW30ZZZ
+45887771,"Magnetic resonance (eg, proton) imaging, abdomen",CPT4,1010531
+2616245,"Magnetic resonance angiography with contrast, abdomen",HCPCS,C8900
+2616246,"Magnetic resonance angiography without contrast, abdomen",HCPCS,C8901
+2616247,"Magnetic resonance angiography without contrast followed by with contrast, abdomen",HCPCS,C8902
+2211517,"Magnetic resonance angiography, abdomen, with or without contrast material(s)",CPT4,74185
+2211516,"Magnetic resonance (eg, proton) imaging, abdomen; without contrast material(s), followed by with contrast material(s) and further sequences",CPT4,74183
+2211515,"Magnetic resonance (eg, proton) imaging, abdomen; with contrast material(s)",CPT4,74182
+2211514,"Magnetic resonance (eg, proton) imaging, abdomen; without contrast material(s)",CPT4,74181

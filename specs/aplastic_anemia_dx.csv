@@ -1,0 +1,17 @@
+concept_id,concept_code,concept_name,vocabulary_id
+4184758,55907008,Acquired aplastic anemia,SNOMED
+137829,306058006,Aplastic anemia,SNOMED
+4186108,413565006,Aplastic anemia associated with metabolic alteration,SNOMED
+4211348,413566007,Aplastic anemia associated with pancreatitis,SNOMED
+4098027,191247005,Aplastic anemia due to radiation,SNOMED
+4100998,191248000,Aplastic anemia due to toxic cause,SNOMED
+4177177,50220002,Cellular immunologic aplastic anemia,SNOMED
+140681,28975000,Constitutional aplastic anemia,SNOMED
+4146086,267524009,Constitutional aplastic anemia with malformation,SNOMED
+4188208,46760003,Estren-Dameshek anemia,SNOMED
+4148471,30575002,Fanconi's anemia,SNOMED
+37204551,783255002,Hereditary isolated aplastic anemia,SNOMED
+4031699,14024008,Humoral immunologic aplastic anemia,SNOMED
+4098145,191256002,Idiopathic aplastic anemia,SNOMED
+4298690,77084001,Immunologic aplastic anemia,SNOMED
+36713970,719019000,WT limb blood syndrome,SNOMED

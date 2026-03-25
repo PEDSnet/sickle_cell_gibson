@@ -1,0 +1,7 @@
+concept_id,concept_name,concept_code,vocabulary_id
+40664802,Performance of trans-abdominal or trans-vaginal ultrasound and pregnancy location documented,G8806,HCPCS
+2110288,"Transabdominal amnioinfusion, including ultrasound guidance",59070,CPT4
+42628063,"Ultrasound, abdominal aorta, real time with image documentation, screening study for abdominal aortic aneurysm (AAA)",76706,CPT4
+2211740,"Ultrasound, abdominal, real time with image documentation; complete",76700,CPT4
+2211741,"Ultrasound, abdominal, real time with image documentation; limited (eg, single organ, quadrant, follow-up)",76705,CPT4
+1314314,"Ultrasound, abdominal, with contrast",C9744,HCPCS

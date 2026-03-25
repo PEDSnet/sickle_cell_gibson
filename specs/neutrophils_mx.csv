@@ -1,0 +1,72 @@
+concept_id,concept_name,concept_code,vocabulary_id
+3028370,Band form neutrophils/100 cells in Bone marrow by Manual count,11103-9,LOINC
+3004809,Band form neutrophils/100 leukocytes in Blood,26508-2,LOINC
+3007591,Band form neutrophils/100 leukocytes in Blood by Manual count,764-1,LOINC
+3017161,Band form neutrophils/100 leukocytes in Body fluid,26510-8,LOINC
+3007905,Band form neutrophils/100 leukocytes in Cerebral spinal fluid,26509-0,LOINC
+3018199,Band form neutrophils [#/volume] in Blood,26507-4,LOINC
+3008939,Band form neutrophils [#/volume] in Blood by Manual count,763-3,LOINC
+1176000,CD24-FLAER- cells/100 cells.CD15 (Neutrophils) in Blood,90737-8,LOINC
+43534249,Drug induced neutrophil Ab [Interpretation] in Serum or Plasma by Flow cytometry (FC) Narrative,73075-4,LOINC
+4015165,"Hypersegmented neutrophil count, blood",104097003,SNOMED
+3001307,Neutrophil Ab [Presence] in Serum,21418-9,LOINC
+3032532,Neutrophil Ab [Presence] in Serum by Flow cytometry (FC),41617-2,LOINC
+40762118,Neutrophil Ab [Units/volume] in Serum by Flow cytometry (FC),59025-7,LOINC
+3046226,Neutrophil Ab [Units/volume] in Serum by Immunoassay,45150-0,LOINC
+4100147,Neutrophil band count,25340006,SNOMED
+4148615,Neutrophil count,30630007,SNOMED
+4014491,"Neutrophil count, automated, synovial fluid",104127007,SNOMED
+3003398,Neutrophil Cytoplasmic Ab atypical [Presence] in Serum by Immunofluorescence,29641-8,LOINC
+3016193,Neutrophil cytoplasmic Ab.classic [Presence] in Serum by Immunofluorescence,17353-4,LOINC
+3004383,Neutrophil cytoplasmic Ab.classic [Titer] in Serum by Immunofluorescence,14277-8,LOINC
+3019395,Neutrophil cytoplasmic Ab pattern [Interpretation] in Serum by Immunofluorescence,21419-7,LOINC
+3049503,Neutrophil cytoplasmic Ab pattern [Interpretation] in Serum by Immunofluorescence Narrative,49308-0,LOINC
+3041690,Neutrophil cytoplasmic Ab.perinuclear.atypical [Presence] in Serum by Immunofluorescence,53029-5,LOINC
+3028967,Neutrophil cytoplasmic Ab.perinuclear.atypical [Titer] in Serum by Immunofluorescence,49503-6,LOINC
+3000423,Neutrophil cytoplasmic Ab.perinuclear [Presence] in Serum by Immunofluorescence,17357-5,LOINC
+3043453,Neutrophil cytoplasmic Ab.perinuclear [Titer] in Serum,32787-4,LOINC
+3003284,Neutrophil cytoplasmic Ab.perinuclear [Titer] in Serum by Immunofluorescence,14278-6,LOINC
+3034270,Neutrophil cytoplasmic Ab.perinuclear [Units/volume] in Serum by Immunoassay,37991-7,LOINC
+3009628,Neutrophil cytoplasmic Ab [Presence] in Serum,17351-8,LOINC
+3032077,Neutrophil cytoplasmic Ab [Presence] in Serum by Immunofluorescence,35279-9,LOINC
+3026712,Neutrophil cytoplasmic Ab [Titer] in Serum,21023-7,LOINC
+3040147,Neutrophil cytoplasmic Ab [Titer] in Serum by Immunofluorescence,51924-9,LOINC
+3001334,Neutrophil cytoplasmic Ab [Units/volume] in Serum,5128-4,LOINC
+3022600,Neutrophil cytoplasmic IgG Ab [Presence] in Serum,17355-9,LOINC
+3018757,Neutrophil cytoplasmic IgG Ab [Titer] in Serum by Immunofluorescence,29967-7,LOINC
+36203201,Neutrophil.fMLP stimulated.DHR mean fluorescence intensity in Blood by Flow cytometry (FC),85370-5,LOINC
+36203202,Neutrophil.fMLP stimulated.DHR mean fluorescence intensity in Control Blood by Flow cytometry (FC),85371-3,LOINC
+36203204,Neutrophil.fMLP stimulated.DHR/Neutrophil.fMLP stimulated.total in Blood by Flow cytometry (FC),85373-9,LOINC
+36203203,Neutrophil.fMLP stimulated.DHR/Neutrophil.fMLP stimulated.total in Control Blood by Flow cytometry (FC),85372-1,LOINC
+44786756,Neutrophil gelatinase-associated lipocalin [Mass/volume] in Urine by Rapid immunoassay,74099-3,LOINC
+3022198,Neutrophil oxidative burst [Presence] in Blood by Flow cytometry (FC),30903-9,LOINC
+44807678,Neutrophil oxidative burst study,797671000000100,SNOMED
+3043468,Neutrophil oxidative burst/unstimulated in Blood,43292-2,LOINC
+4153001,Neutrophil percent differential count,271035003,SNOMED
+36203205,Neutrophil.PMA stimulated.DHR mean fluorescence instensity in Blood by Flow cytometry (FC),85374-7,LOINC
+3018010,Neutrophils/100 leukocytes in Blood,26511-6,LOINC
+3008342,Neutrophils/100 leukocytes in Blood by Automated count,770-8,LOINC
+3027368,Neutrophils/100 leukocytes in Blood by Manual count,23761-0,LOINC
+3014502,Neutrophils/100 leukocytes in Body fluid,26513-2,LOINC
+3019947,Neutrophils/100 leukocytes in Body fluid by Manual count,12238-2,LOINC
+3018562,Neutrophils/100 leukocytes in Cerebral spinal fluid,26512-4,LOINC
+3040949,Neutrophils/100 leukocytes in Synovial fluid by Manual count,40491-3,LOINC
+3009864,Neutrophils.hypersegmented/100 leukocytes in Blood,30450-1,LOINC
+3007030,Neutrophils.hypersegmented [Presence] in Blood by Light microscopy,765-8,LOINC
+3042451,Neutrophils.hypogranulated [Presence] in Blood by Light microscopy,40654-6,LOINC
+3033907,Neutrophils.vacuolated [Presence] in Blood by Light microscopy,18319-4,LOINC
+3045763,Neutrophils.vacuolated+Segmented [Presence] in Blood,34473-9,LOINC
+3017732,Neutrophils [#/volume] in Blood,26499-4,LOINC
+3013650,Neutrophils [#/volume] in Blood by Automated count,751-8,LOINC
+3017501,Neutrophils [#/volume] in Blood by Manual count,753-4,LOINC
+3046321,Neutrophils [#/volume] in Body fluid,32709-8,LOINC
+3038972,Neutrophils [#/volume] in Body fluid by Manual count,40566-2,LOINC
+3033463,Neutrophils [#/volume] in Cerebral spinal fluid,26500-9,LOINC
+36203200,Neutrophils [#/volume] in Control Blood by Flow cytometry (FC),85369-7,LOINC
+3017354,Segmented neutrophils/100 leukocytes in Blood,26505-8,LOINC
+3022005,Segmented neutrophils/100 leukocytes in Body fluid,30453-5,LOINC
+3023500,Segmented neutrophils/100 leukocytes in Body fluid by Manual count,30230-7,LOINC
+3017900,Segmented neutrophils/100 leukocytes in Cerebral spinal fluid,26506-6,LOINC
+3026086,Segmented neutrophils/100 leukocytes in Cerebral spinal fluid by Manual count,14107-7,LOINC
+3030924,Segmented neutrophils/100 leukocytes in Pleural fluid,33385-6,LOINC
+3015586,Segmented neutrophils [#/volume] in Blood,30451-9,LOINC

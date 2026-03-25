@@ -1,0 +1,6 @@
+concept_id,concept_name,concept_code,vocabulary_id
+3001455,Platelet IgM Ab [Presence] in Serum,31186-0,LOINC
+36303804,IgM cells/100 CD19 cells in Blood,89346-1,LOINC
+3028026,IgM [Mass/volume] in Serum or Plasma,2472-9,LOINC
+3023072,Platelet associated IgM Ab [Presence] in Blood by Flow cytometry (FC),29498-3,LOINC
+4164130,Immunoglobulin M measurement,45764000,SNOMED

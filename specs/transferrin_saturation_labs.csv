@@ -1,0 +1,12 @@
+"concept_id","concept_name","domain_id","vocabulary_id","concept_class_id","standard_concept","concept_code","valid_start_date","valid_end_date","invalid_reason"
+37398955,"Transferrin saturation index","Measurement","SNOMED","Observable Entity",NA,"991831000000103",2016-04-01,2099-12-31,NA
+40302886,"Transferrin saturation index","Measurement","SNOMED","Procedure",NA,"143134000",2002-01-31,2002-01-31,"U"
+36316430,"Transferrin saturation","Measurement","MedDRA","PT","C","10051007",1970-01-01,2099-12-31,NA
+1200114,"Transferrin saturation abnormal","Measurement","MedDRA","PT","C","10079855",2018-09-01,2099-12-31,NA
+37522944,"Transferrin Saturation","Measurement","CDISC","Procedure",NA,"C98792-TFRRNSAT",2023-12-01,2099-12-31,NA
+3007987,"Deprecated Transferrin saturation in Serum or Plasma","Measurement","LOINC","Lab Test",NA,"6796-7",2011-03-15,2011-03-16,"U"
+36316431,"Transferrin saturation decreased","Measurement","MedDRA","PT","C","10050770",1970-01-01,2099-12-31,NA
+36316432,"Transferrin saturation increased","Measurement","MedDRA","PT","C","10050771",1970-01-01,2099-12-31,NA
+45468722,"Transferrin saturation index","Measurement","Read","Read",NA,"42d1.00",1970-01-01,2099-12-31,NA
+37174406,"Transferrin saturation index (Iron saturation/transferrin percent) in serum","Measurement","SNOMED","Observable Entity","S","2661000237108",2023-06-07,2099-12-31,NA
+4306252,"Transferrin saturation","Measurement","SNOMED","Procedure","S","165730006",2005-01-31,2099-12-31,NA
