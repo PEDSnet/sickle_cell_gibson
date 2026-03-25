@@ -117,6 +117,19 @@ vod_prop_calculation <- function(df, iron_var){
 
   return (data.frame(cutoff = iron_val, prop = prop))
 }
+
+site_mask <- function(cohort_tbl){
+  cohort_tbl %>%
+    mutate(site = case_when(site == "chop" ~ "site_1",
+                          site == "colorado" ~ "site_2",
+                          site == "stanford" ~ "site_3",
+                          site == "lurie" ~ "site_4",
+                          site == "seattle" ~ "site_5",
+                          site == "nationwide" ~ "site_6",
+                          site == "nemours" ~ "site_7",
+                          site == "cchmc" ~ "site_8",
+                          TRUE ~ NA)) %>% return()
+}
 ```
 
 ```{r report_recap, echo=FALSE, message=FALSE, warning=FALSE, paged.print=FALSE}
@@ -215,6 +228,17 @@ cohort_ct <- cohort %>% distinct_ct()
   - Category 6: Cord (related or unrelated)
   - Category 7: Autologous (no donor)
 
+# Site masking: 
+- Site names are masked according to: 
+  - chop: site_1
+  - colorado: site_2
+  - stanford: site_3
+  - lurie: site_4
+  - seattle: site_5
+  - nationwide: site_6
+  - nemours: site_7
+  - cchmc: site_8
+  
 # Result Summary
 
 - <span style="background-color: #FFFF00"> For patients without chart review data, we use date of first transplant from EHR as cohort entry (CE)</span>. 
@@ -342,13 +366,13 @@ cohort_covars <- cohort_covars %>% collect() %>%
                 survival_5yr = if_else(death_days_since_ce >= (365.25*5) | is.na(death_days_since_ce), "Alive", "Death"),
                 disease_relapse_days_since_ce = as.numeric(difftime(graft_fail_date, transplant_date, units = "days")),
                 bacteremia = if_else(is.na(bacteremia), "No", "Yes")) %>%
-          mutate(last_in_person_visit_since_ce = case_when(last_in_person_visit_since_ce <= 180 ~ "0-6 months",
-                                                  last_in_person_visit_since_ce <= 365.25 ~ "6-12 months",
-                                                  last_in_person_visit_since_ce <= 365.25*3 ~ "1-3 yrs",
-                                                  last_in_person_visit_since_ce <= 365.25*5 ~ "3-5 yrs",
-                                                  last_in_person_visit_since_ce > 365.25*5 ~ "more than 5-yrs",
-                                                  TRUE ~ NA),
-        #  age_at_ce = round(as.numeric(difftime(transplant_date, birth_date, unit = "days"))/365.25),
+          # mutate(last_in_person_visit_since_ce = case_when(last_in_person_visit_since_ce <= 180 ~ "0-6 months",
+          #                                         last_in_person_visit_since_ce <= 365.25 ~ "6-12 months",
+          #                                         last_in_person_visit_since_ce <= 365.25*3 ~ "1-3 yrs",
+          #                                         last_in_person_visit_since_ce <= 365.25*5 ~ "3-5 yrs",
+          #                                         last_in_person_visit_since_ce > 365.25*5 ~ "more than 5-yrs",
+          #                                         TRUE ~ NA),
+         mutate(age_at_ce = round(as.numeric(difftime(transplant_date, birth_date, unit = "days"))/365.25),
          donor_relation = if_else(is.na(donor_relation), "Unknown", donor_relation),
          match_status = if_else(is.na(match_status), "Unknown", match_status),
          second_transplant = if_else(is.na(second_transplant_date), "No", "Yes"),
@@ -410,7 +434,7 @@ label(cohort_covars$second_transplant) = "Had a second transplant"
 label(cohort_covars$donor_relation) = "Donor relationship to the patient"
 label(cohort_covars$match_status) = "Match status"
 label(cohort_covars$scd_type) = "Disease Type"
-label(cohort_covars$last_visit_since_ce) = "Follow-up duration (yrs)"
+label(cohort_covars$last_in_person_visit_since_ce) = "Follow-up duration (yrs)"
 # label(cohort_covars$LIC_level) = "Pre-transplant Ferritin Level"
 # label(cohort_covars$LIC_days_since_transplant) = "No days between CE and LIC measurements"
 label(cohort_covars$CD3_reconstitution) = "CD3 reconstition post-transplant"
@@ -432,13 +456,16 @@ label(cohort_covars$transplant_type_combined) = "Transplant & donor status"
 cohort_t1 <- cohort_covars %>% filter(aim_2a_2 | aim_2a_1) %>% mutate(aim = "aim_2a") %>%
                 union(cohort_covars %>% filter(aim_2b_1 | aim_2b_2) %>% mutate(aim = "aim_2b")) %>%
                 union(cohort_covars %>% filter(aim_3_1 | aim_3_2) %>% mutate(aim = "aim_3") )%>%
-                union(cohort_covars %>% distinct(person_id, .keep_all = TRUE) %>% mutate(aim = "Total"))
+                union(cohort_covars %>% distinct(person_id, .keep_all = TRUE) %>% mutate(aim = "Total")) %>%
+                site_mask() %>%
+                mutate(site = relevel(as.factor(site), ref = "site_1"))
+
 label(cohort_t1$age_group) = "Age at first transplant"
 label(cohort_t1$gender) = "Gender"
 label(cohort_t1$transplant_type) = "Type of transplant"
 label(cohort_t1$scd_type) = "Type of scd"
 
-table1(~gender + age_at_ce + age_group + ethnicity + transplant_type + scd_type + transplant_type_combined| aim, 
+table1(~gender + age_at_ce + age_group + ethnicity + transplant_type + scd_type + transplant_type_combined + site| aim, 
       data = cohort_t1,
       overall = FALSE, 
       caption = "Table 1: cohort characteristics",
@@ -480,10 +507,13 @@ LIC_data <- results_tbl("cr_LIC_data") %>%
 cohort_covars_LIC <- cohort_covars %>% left_join(LIC_data, by = c("record_id", "transplant_date"))
 aim_2a_1 <- cohort_covars_LIC %>% filter(!is.na(LIC_level),  #aim_2a_1, 
                                     LIC_type == "pre-transplant", chart_completion) %>% 
-            collect()
+            collect() %>%
+            site_mask() %>%
+            mutate(site = relevel(as.factor(site), ref = "site_1"))
 
 table1(~no_LIC_pre + scd_type + 
-       age_group + age_at_ce + 
+       age_group + 
+       age_at_ce + 
        gender + 
        disease_relapse + disease_relapse_days_since_ce + 
        survival + death_days_since_ce + 
@@ -496,7 +526,7 @@ table1(~no_LIC_pre + scd_type +
       busulfan_and_vod + no_LIC_over_10_pre +
       busulfan_and_LIC_over_10 + 
       busulfan_and_VOD_and_LIC_over_10 + 
-      transplant_type_combined| LIC_1_level, 
+      transplant_type_combined + site| LIC_1_level, 
       data = aim_2a_1,
       overall = c(right = "Total"), 
       caption = "Pre-transplant LIC status (Only patients with completed chart reviews AND verifiable LIC unit conversions)",
@@ -522,13 +552,18 @@ aim_2a_1 %>% ggplot(aes(x = LIC)) +
 ```{r aim_2a_1_binary_LIC_pre}
 aim_2a_1_binary <- cohort_covars_LIC %>% filter(!is.na(LIC_level_1_binary), 
                                     LIC_type == "pre-transplant", 
-                                    chart_completion) %>% collect()
+                                    chart_completion) %>% 
+                                    collect() %>% 
+                                    mutate(last_in_person_visit_since_ce = last_in_person_visit_since_ce/365.25) %>%
+                                    site_mask() %>%
+                                    mutate(site = relevel(as.factor(site), ref = "site_1"))
 
 
 table1(~no_LIC_pre + scd_type + age_at_ce + age_group + gender + 
        disease_relapse + disease_relapse_days_since_ce + 
        survival + death_days_since_ce + 
        LIC_days_since_transplant + 
+       last_in_person_visit_since_ce + 
        survival_1yr + survival_3yr + survival_5yr + 
       # death_days_since_last_transplant +
       GVHD + vod_subgroup + bacteremia +
@@ -537,7 +572,7 @@ table1(~no_LIC_pre + scd_type + age_at_ce + age_group + gender +
       busulfan_and_vod + no_LIC_over_10_pre +
       busulfan_and_LIC_over_10 + 
       busulfan_and_VOD_and_LIC_over_10 + 
-      transplant_type_combined| LIC_level_1_binary, 
+      transplant_type_combined + site| LIC_level_1_binary, 
       data = aim_2a_1_binary,
       overall = c(right = "Total"), 
       caption = "Pre-transplant LIC status (Only patients with completed chart reviews AND verifiable LIC unit conversions)",
@@ -559,7 +594,9 @@ table1(~no_LIC_pre + scd_type + age_at_ce + age_group + gender +
 aim_2a_1_binary_5 <- cohort_covars_LIC %>% filter(!is.na(LIC_level_1_binary), 
                                     LIC_type == "pre-transplant", 
                                     chart_completion) %>% collect() %>%
-                    mutate(LIC_level_1_binary = if_else(LIC <5, "low", "high"))
+                    mutate(LIC_level_1_binary = if_else(LIC <5, "low", "high")) %>%
+                    site_mask() %>%
+                    mutate(site = relevel(as.factor(site), ref = "site_1"))
 
 
 table1(~no_LIC_pre + scd_type + age_at_ce + age_group + gender + 
@@ -574,7 +611,7 @@ table1(~no_LIC_pre + scd_type + age_at_ce + age_group + gender +
       busulfan_and_vod + no_LIC_over_10_pre +
       busulfan_and_LIC_over_10 + 
       busulfan_and_VOD_and_LIC_over_10 + 
-      transplant_type_combined| LIC_level_1_binary, 
+      transplant_type_combined + site| LIC_level_1_binary, 
       data = aim_2a_1_binary_5,
       overall = c(right = "Total"), 
       caption = "Pre-transplant LIC status (Only patients with completed chart reviews AND verifiable LIC unit conversions)",
@@ -597,7 +634,9 @@ table1(~no_LIC_pre + scd_type + age_at_ce + age_group + gender +
 ```{r aim_2a_1_binary_LIC_max_pre_cutoff_5}
 aim_2a_1_binary_max <- cohort_covars_LIC %>% filter(!is.na(LIC_level_3_max_binary), 
                                     LIC_type == "pre-transplant", 
-                                    chart_completion) %>% collect()
+                                    chart_completion) %>% collect() %>%
+                                    site_mask() %>%
+                                    mutate(site = relevel(as.factor(site), ref = "site_1"))
 
 
 table1(~no_LIC_pre + scd_type + age_at_ce + age_group + gender + 
@@ -612,7 +651,7 @@ table1(~no_LIC_pre + scd_type + age_at_ce + age_group + gender +
       busulfan_and_vod + no_LIC_over_10_pre +
       busulfan_and_LIC_over_10 + 
       busulfan_and_VOD_and_LIC_over_10 + 
-      transplant_type_combined| LIC_level_3_max_binary, 
+      transplant_type_combined + site| LIC_level_3_max_binary, 
       data = aim_2a_1_binary_max,
       overall = c(right = "Total"), 
       caption = "Pre-transplant LIC status (Only patients with completed chart reviews AND verifiable LIC unit conversions)",
@@ -639,7 +678,10 @@ ferritin_data <- results_tbl("cr_ferritin_data") %>%
 cohort_covars_ferritin <- cohort_covars %>% left_join(ferritin_data, by = c("person_id", "transplant_date"))
 
 aim_2a_2 <- cohort_covars_ferritin %>% 
-                filter(chart_completion, !is.na(ferritin_pre)) 
+                filter(chart_completion, !is.na(ferritin_pre)) %>%
+                mutate(last_in_person_visit_since_ce = last_in_person_visit_since_ce/365.25) %>%
+                site_mask() %>%
+                mutate(site = relevel(as.factor(site), ref = "site_1"))
 
 table1(~no_ferritin_pre + scd_type + age_at_ce + age_group + gender + disease_relapse + 
        disease_relapse_days_since_ce + 
@@ -649,14 +691,14 @@ table1(~no_ferritin_pre + scd_type + age_at_ce + age_group + gender + disease_re
        transplant_type + 
        donor_relation + match_status + 
        second_transplant + scd_type + 
-       round(last_visit_since_ce/365.25, 1) + 
+       last_in_person_visit_since_ce + 
        GVHD + vod_subgroup + bacteremia +
        conditioning_type + has_busulfan + 
-       busulfan_and_vod + transplant_type_combined| ferritin_pre, 
+       busulfan_and_vod + transplant_type_combined + site| ferritin_pre, 
        data = aim_2a_2, 
        overall = c(right = "Total"), 
        caption = "Pre-transplant ferritin status",
-       extra.col=list(`P-value`=pvalue), 
+      #  extra.col=list(`P-value`=pvalue), 
        footnote = c("* Missing indicates patients without disease relapse/death")) 
       #  render.continuous= c(.="Median [Q1, Q3]"))
 ```
@@ -692,10 +734,10 @@ table1(~no_ferritin_pre + scd_type + age_at_ce + age_group + gender + disease_re
        transplant_type + 
        donor_relation + match_status + 
        second_transplant + scd_type + 
-       round(last_visit_since_ce/365.25, 1) + 
+       round(last_in_person_visit_since_ce/365.25, 1) + 
        GVHD + vod_subgroup + bacteremia +
        conditioning_type + has_busulfan + 
-       busulfan_and_vod + transplant_type_combined| ferritin_pre, 
+       busulfan_and_vod + transplant_type_combined + site| ferritin_pre, 
        data = aim_2a_2 %>% 
             mutate(ferritin_pre = if_else(ferritin_pre %in% c("low", "moderate"), "low-moderate", "high")), 
        overall = c(right = "Total"), 
@@ -711,7 +753,11 @@ table1(~no_ferritin_pre + scd_type + age_at_ce + age_group + gender + disease_re
 ### Aim_2b_1: Post-transplant LIC status 
 - <span style="background-color: #FFFF00">This table only has patients with complete chart reviews AND verifiable LIC unit conversions </span
 ```{r aim_2b_1_LIC_post}
-aim_2b_1 <- cohort_covars_LIC %>% filter(!is.na(LIC_level), LIC_type == "post-transplant", chart_completion) %>% collect() 
+aim_2b_1 <- cohort_covars_LIC %>% 
+          filter(!is.na(LIC_level), LIC_type == "post-transplant", chart_completion) %>% 
+          collect() %>%
+          site_mask() %>%
+          mutate(site = relevel(as.factor(site), ref = "site_1"))
 
 table1(~no_LIC_post + scd_type + age_at_ce + gender + 
        disease_relapse + disease_relapse_days_since_ce + death_days_since_ce + 
@@ -721,7 +767,7 @@ table1(~no_LIC_post + scd_type + age_at_ce + gender +
       #  CD3_reconstitution + CD4_reconstitution + CD8_reconstitution + IgM_reconstitution + 
        vod + GVHD + 
       # death_days_since_last_transplant +
-      bacteremia + transplant_type_combined| LIC_1_level, 
+      bacteremia + transplant_type_combined + site| LIC_1_level, 
       data = aim_2b_1,
       caption = "Post-transplant LIC status (Only patients with completed chart reviews AND verifiable LIC unit conversions)",
       # render.continuous= c(.="Median [Q1, Q3]"), 
@@ -738,7 +784,10 @@ aim_2b_1 %>% ggplot(aes(x = LIC)) +
 - <span style="background-color: #FFFF00">This table only has patients with complete chart reviews </span>
 ```{r aim_2b_2_ferritin_post}
 aim_2b_2 <- cohort_covars_ferritin %>% 
-              filter(chart_completion, !is.na(ferritin_post)) %>% collect() 
+              filter(chart_completion, !is.na(ferritin_post)) %>% 
+              collect() %>%
+              site_mask() %>%
+              mutate(site = relevel(as.factor(site), ref = "site_1"))
 
 table1(~no_ferritin_post + scd_type + age_at_ce + gender + 
        disease_relapse + 
@@ -750,7 +799,7 @@ table1(~no_ferritin_post + scd_type + age_at_ce + gender +
       #  CD3_reconstitution + CD4_reconstitution + CD8_reconstitution + IgM_reconstitution + 
        GVHD + vod_subgroup + 
       # death_days_since_last_transplant +
-      bacteremia + transplant_type_combined| ferritin_post, 
+      bacteremia + transplant_type_combined + site| ferritin_post, 
       data = aim_2b_2,
       caption = "Post-transplant ferritin status",
       # render.continuous= c(.="Median [Q1, Q3]"), 
@@ -788,9 +837,9 @@ read.csv("../local/attrition_aim3.csv") %>%
     - ignore the number of refills since this is not very realible, some patients have upto 10 or 11 refills. 
 - I did a very deep dive into the row-level data to see why the numbers are so low, I also moved the calculations from database version 5.1 (which is our database that we currently use) to the latest database version 5.5 to see if the drugs data had been enriched in the last few itterations. The numbers did not change much. 
 
-### Ferritin trajectories
+### Ferritin trajectories within 1 year following transplant
 ![Ferritin Trajectories for IRT patients](irt_ferritin_trjectories.png){width=70% fig-align="center"}
-```{r ferritin_reduction}
+```{r ferritin_reduction_1yr}
 ferritin_reduction <- results_tbl("ferritin_trajectories_IRT") %>% collect() %>%
   mutate(ferritin_date = as.numeric(ferritin_date - transplant_date)) %>%
       mutate(start_date = as.numeric(start_date - transplant_date)) %>%
@@ -798,6 +847,55 @@ ferritin_reduction <- results_tbl("ferritin_trajectories_IRT") %>% collect() %>%
       filter(!(person_id %in% c(4502732, 599793, 9720611))) %>%  #remove patients with missing ferritin values
       filter(duration > 0) %>%
       filter(ferritin_date <= 365) %>% 
+      mutate(end_date = case_when(person_id == 298603 ~ start_date + quantity, 
+                                TRUE ~ end_date))
+
+ferritin_start <- linear_interpolate_per_patient(df = ferritin_reduction, df_interpolated = ferritin_reduction %>% distinct(person_id, start_date) %>% rename(c("interpolated_t" = "start_date")))
+# ferritin_start %>% view()
+
+ferritin_end <- linear_interpolate_per_patient(df = ferritin_reduction, df_interpolated = ferritin_reduction %>% distinct(person_id, end_date) %>% rename(c("interpolated_t" = "end_date")))
+# ferritin_end %>% view()
+
+# fit a linear line to the ferritin change
+final_ferritin_trjectories <- ferritin_start %>% select(person_id, t0 = interpolated_t, f0 = interpolated_ferritin) %>%
+      full_join(ferritin_end %>% select(person_id, t1 = interpolated_t, f1 = interpolated_ferritin), by = "person_id") %>%
+      filter(!is.na(f0), !is.na(f1)) %>%
+      left_join(ferritin_reduction %>% distinct(person_id, IRT_type), by = "person_id") %>%
+      mutate(f_change = (f0-f1)/(t1-t0)/30) %>% mutate(duration = (t1-t0)/30)
+      
+final_ferritin_trjectories %>% 
+      ggplot(aes(x = (t1-t0)/30, y = f_change)) + 
+      geom_point(color = "black", size = 3.5, alpha = 0.6) + # Scatter points
+      geom_smooth(method = "lm", se = FALSE, color = "red", linetype = "dashed") + # Regression line
+      stat_regline_equation(label.x = 5, label.y = 0.5, aes(label = ..eq.label..), 
+                        size = 8) + # Equation
+      stat_regline_equation(label.x = 5, # R-squared
+                        label.y = 0.45, 
+                        aes(label = paste(..rr.label..)), 
+                        parse = TRUE, # Enables proper superscript
+                        size = 8) + # Increase text size
+      labs(title = "Ferritin reduction rate vs. treatment duration for IRT patients",
+       y = "Ferritin reduction rate (ng/mL/month)",
+       x = "Treatment duration (month)")
+
+label(final_ferritin_trjectories$duration) <- "treatment duration (months)"
+label(final_ferritin_trjectories$f_change) <- "ferritin reduction rate (ng/mL/month)"
+
+table1(~duration + f_change| IRT_type, 
+      data = final_ferritin_trjectories %>% 
+            mutate(IRT_type = if_else(IRT_type %in% c("deferasirox", "deferoxamine"), "drugs", IRT_type)), 
+      overall = TRUE, caption =  "Ferritin reduction rate vs. treatment duration for IRT patients")
+```
+
+### Ferritin trajectories after transplant
+```{r ferritin_reduction}
+ferritin_reduction <- results_tbl("ferritin_trajectories_IRT_no_time_constraint") %>% collect() %>%
+  mutate(ferritin_date = as.numeric(ferritin_date - transplant_date)) %>%
+      mutate(start_date = as.numeric(start_date - transplant_date)) %>%
+      mutate(end_date = as.numeric(end_date - transplant_date)) %>% 
+      filter(!(person_id %in% c(4502732, 599793, 9720611))) %>%  #remove patients with missing ferritin values
+      filter(duration > 0) %>%
+      # filter(ferritin_date <= 365) %>% 
       mutate(end_date = case_when(person_id == 298603 ~ start_date + quantity, 
                                 TRUE ~ end_date))
 

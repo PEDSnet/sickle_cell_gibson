@@ -39,12 +39,12 @@ config('qry_site', 'all_sites')
 #'     * `Sys.setenv(ORA_SDTZ=Sys.timezone())`
 #'
 #' @md
-if(Sys.getenv("db_version") == "5.5"){
+if(Sys.getenv("db_version") == "5.7"){
   # the study starts on db5.1
    config('db_src', {
   require(srcr);
   default <- Sys.getenv('PEDSNET_DB_SRC_CONFIG_BASE', unset = NA)
-  if (is.na(default) || nchar(default) == 0) default <- 'argos_pedsnet_5.5'
+  if (is.na(default) || nchar(default) == 0) default <- 'argos_pedsnet_5.7'
   srcr(paths = file.path(base_dir, paste0(default, ".json")))}) 
 } else if (Sys.getenv("db_version") == "5.1"){
   # the study starts on db5.1
@@ -52,8 +52,14 @@ if(Sys.getenv("db_version") == "5.5"){
   require(srcr);
   default <- Sys.getenv('PEDSNET_DB_SRC_CONFIG_BASE', unset = NA)
   if (is.na(default) || nchar(default) == 0) default <- 'argos_pedsnet_5.1'
-  srcr(paths = file.path(base_dir, paste0(default, ".json")))
-})
+  srcr(paths = file.path(base_dir, paste0(default, ".json")))})
+
+  # connnection to vocabulary tables
+  config('vocabulary', {
+  require(srcr);
+  default <- Sys.getenv('PEDSNET_DB_SRC_CONFIG_BASE', unset = NA)
+  if (is.na(default) || nchar(default) == 0) default <- 'argos_pedsnet_5.7'
+  srcr(paths = file.path(base_dir, paste0(default, ".json")))})
 }
 
 

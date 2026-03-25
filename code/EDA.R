@@ -164,16 +164,20 @@ ferritin_post_max <- rslt$study_cohorts %>% select(person_id, transplant_date) %
 
 
 ferritin <- ferritin_pre %>% select(person_id, transplant_date, 
+                                ferritin_pre_val = ferritin, 
                                 ferritin_pre = ferritin_level, 
                                 ferritin_days_pre = ferritin_days_since_transplant) %>%
                 full_join(ferritin_post %>% select(person_id, transplant_date, 
+                                                ferritin_post_val = ferritin,
                                                 ferritin_post = ferritin_level, 
                                                 ferritin_days_post = ferritin_days_since_transplant), by =  c("person_id", "transplant_date")) %>%
                 full_join(ferritin_pre_max %>% select(person_id, transplant_date, 
+                                                ferritin_pre_max_val = ferritin, 
                                                 ferritin_pre_max = ferritin_level, 
                                                 ferritin_days_pre_max = ferritin_days_since_transplant), by = c("person_id", "transplant_date")) %>%
                 full_join(ferritin_post_max %>% select(person_id, transplant_date, 
-                                                ferritin_post_max = ferritin_level, 
+                                                ferritin_post_max = ferritin_level,
+                                                ferritin_post_max_val = ferritin, 
                                                 ferritin_days_post_max = ferritin_days_since_transplant), by = c("person_id", "transplant_date")) %>%
                 mutate(across(c("ferritin_post", "ferritin_pre", "ferritin_post_max", "ferritin_pre_max"), ~factor(.x, levels = c("low", "moderate", "high")))) %>%
                 left_join(ferritin_pre_ct, by = c("person_id", "transplant_date")) %>%
@@ -213,20 +217,30 @@ last_visits <- cdm_tbl("visit_occurrence") %>% inner_join(cohort_covars %>%
                                                         select(person_id, transplant_date) %>%
                                                         copy_to_new(df =., name = "sdfsd"), by = "person_id") %>%
             select(person_id, visit_occurrence_id, visit_start_date, visit_end_date, visit_concept_id, transplant_date) %>%
-            filter(visit_start_date >= transplant_date) %>% collect() %>%
+            filter(visit_end_date >= transplant_date) %>% collect() %>%
             mutate(last_visit_since_ce = as.numeric(difftime(visit_end_date, transplant_date, units = "days"))) 
-            
-last_visits_in_person <- last_visits %>% filter(!(visit_concept_id %in% c(44814711, 44814653, 44814649, 44814650))) %>% 
+
+last_visits <- last_visits %>% filter((visit_concept_id %in% c(9201, 2000001532, 9202, 9203, 2000000048))) %>% 
                         group_by(person_id) %>%
-                        slice_max(last_visit_since_ce, n = 1, with_ties = FALSE) %>% ungroup()          
-            
-last_visits <- last_visits %>% group_by(person_id) %>%
-               slice_max(last_visit_since_ce, n = 1, with_ties = FALSE) %>% ungroup() %>% 
-               left_join(last_visits_in_person %>% select(person_id, 
-                                                        last_in_person_visit_since_ce = last_visit_since_ce), by = "person_id") %>%
-                select(person_id, last_visit_since_ce, last_in_person_visit_since_ce)
+                        slice_max(last_visit_since_ce, n = 1, with_ties = FALSE) %>% 
+                        ungroup() %>%
+                        select(person_id, last_visit_since_ce) %>%
+                        arrange(desc(last_visit_since_ce))
+
 # last_visits %>% view()
 cohort_covars <- cohort_covars %>% left_join(last_visits %>% copy_to_new(df =., name = "sdfsd"), by = "person_id")
+
+
+results_tbl("analytics_dataset") %>% 
+      # select(c("last_visit_since_ce")) %>%
+      left_join(last_visits %>% copy_to_new(df =., name = "sdfsd"), by = "person_id") %>%
+      collect() %>% 
+      output_tbl(name = "analytics_dataset")
+
+# results_tbl("analytics_dataset") %>%
+#       rename(last_in_person_visit_since_ce = last_visit_since_ce) %>%
+#       collect() %>%
+#       output_tbl(name = "analytics_dataset")
 
 # overall survival
 # there are 2 patients with more than 1 death causes
@@ -533,7 +547,7 @@ aim3 <- aim_3 %>%
       select(record_id, person_id, transplant_date) %>%
       left_join(results_tbl("covar_ferritin_mx"), by = "person_id") %>% 
       filter(transplant_date <= ferritin_date) %>% 
-      filter(ferritin_date - transplant_date <= 600) %>%
+      # filter(ferritin_date - transplant_date <= 600) %>%
       filter(!is.na(ferritin)) %>%
       group_by(person_id) %>% 
       mutate(n = n()) %>% filter(n >=1) %>% ungroup()
@@ -582,7 +596,7 @@ append_sum(cohort = 'No. patients received deferoxamine/deferasirox after transp
              persons = distinct_ct(chelation_rx))
 
 chelation_rx <- chelation_rx %>%
-      filter(drug_exposure_start_date - transplant_date <= 365) %>% 
+      # filter(drug_exposure_start_date - transplant_date <= 365) %>% 
       distinct(person_id, drug_exposure_start_date, IRT_type = type, .keep_all = TRUE) 
 
 append_sum(cohort = 'No. patients received deferoxamine/deferasirox within 1 year after transplant',
@@ -677,7 +691,8 @@ ferritin_all <- irt %>% copy_to_new(df = ., name = "irt") %>%
                   select(person_id, ferritin_date, ferritin), by = "person_id") %>%
       filter(transplant_date <= ferritin_date) %>%
       filter(!is.na(ferritin)) %>%
-      filter(transplant_date - ferritin_date <= 365) %>% collect_new()
+      # filter(transplant_date - ferritin_date <= 365) %>% 
+      collect_new()
 
 ferritin_0 <- ferritin_all %>% group_by(person_id, IRT_type) %>%
           slice_min(abs(start_date - ferritin_date), n = 1, with_ties = FALSE) %>% ungroup() %>%
@@ -758,7 +773,7 @@ output_sum(name = "attrition_aim3", local = TRUE, file = TRUE)
 
 final_ferritin_trjectories %>% ggplot(aes(x = t1-t0, y = f_change)) + geom_point() + geom_smooth() 
       
-ferritin_all %>% output_tbl("ferritin_trajectories_IRT")
+ferritin_all %>% output_tbl("ferritin_trajectories_IRT_no_time_constraint")
 
 
 # moves table from db 5.1 to db 5.5

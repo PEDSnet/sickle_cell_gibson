@@ -166,9 +166,9 @@ generate_platelet_plots <- function(data,
     p <- subset_data %>% ggplot(aes(x = platelet_days_since_ce)) + 
     geom_point(aes(y = platelet_mean_ct), size = point_size, colour = "red") + 
     # geom_point(aes(y = platelet_max_ct), size = point_size, colour = "black") + 
-    geom_label(aes(x = transfusion_days_since_ce, y = 50000, label = "BT"), size = label_size, colour = "red") +
-    facet_wrap(~record_id, ncol = 2, scales = "free") +
-    coord_cartesian(xlim = c(-5, 100), ylim = c(0, 100000))
+    geom_point(aes(y = 50000, x = transfusion_days_since_ce), size = point_size, colour = "black") + 
+    # geom_label(aes(x = transfusion_days_since_ce, y = 50000, label = "BT"), size = label_size, colour = "red") +
+    facet_wrap(~record_id, ncol = 2, scales = "free") 
 
     p <- p + 
         geom_hline(yintercept = cutoff, linetype = "dashed", color = "red") +  
@@ -180,9 +180,10 @@ generate_platelet_plots <- function(data,
         geom_segment(data = ann_text, aes(x = nadir, xend = nadir, y = 0, yend = 80000), linetype = "dashed", colour = "blue") +  
         geom_label(data = ann_text, aes(x = as.numeric(platelet_engraftment_date), y = 70000, label = sprintf("platelet %s", platelet_engraftment_date)), size = label_size, colour = "magenta") +
         geom_segment(data = ann_text, aes(x = as.numeric(platelet_engraftment_date), xend = as.numeric(platelet_engraftment_date), y = 0, yend = 70000), linetype = "dashed", colour = "magenta") +
-        scale_x_continuous(minor_breaks = seq(-5, 100, by = 5),  # Minor grid every 5
-        breaks = seq(0, 100, by = 20) +           # Major grid every 2
-        theme(panel.grid.minor = element_line(color = "gray", linetype = "dotted"))) 
+        # scale_x_continuous(minor_breaks = seq(-5, 100, by = 5),  # Minor grid every 5
+        # breaks = seq(0, 100, by = 20) +           # Major grid every 2
+        # theme(panel.grid.minor = element_line(color = "gray", linetype = "dotted"))) +
+        coord_cartesian(xlim = c(-5, 100), ylim = c(0, 100000))
     
     plot_filename <- paste0("results/platelet_plots/plots_page_", page_num, ".pdf")
     pdf(plot_filename)

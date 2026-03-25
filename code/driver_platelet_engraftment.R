@@ -27,7 +27,9 @@
     rslt$platelet <- find_measurements(cohort = rslt$study_cohorts, 
                                              mx_codeset = load_codeset("platelet_mx")) 
     rslt$platelet <- rslt$platelet %>% filter(aim_2a_1 | aim_2a_2) %>% collect()
-    rslt$platelet %>% output_tbl(name = "platelet_mx_org")                                             
+    rslt$platelet %>% output_tbl(name = "platelet_mx_org")        
+
+    rslt$platelet <- results_tbl(name = "platelet_mx_org")                                    
     rslt$platelet <- rslt$platelet %>% #filter(aim_2a_1 | aim_2a_2) %>% collect() %>% 
                      # if we have a lot of patients with missing platelet counts, we might need to check the filtered data
                     # filter(measurement_concept_id %in% c( "3007461", "3024929", "4267147"),
@@ -108,15 +110,19 @@
                 platelet_max_ct = value_as_number_max, platelet_mean_ct = value_as_number_mean, 
                 platelet_consec_max, platelet_consec_mean, platelet_days_since_ce)
 
-    rslt$transfusion <- results_tbl("covar_platelet_transfusion_px") %>% collect() %>%
+    # Nora said to exclude the following transfusion codes because its seemed to be mixed in with red blood cell transfusion
+    rslt$transfusion <- results_tbl("covar_platelet_transfusion_px") %>% collect() %>% 
                 mutate(transfusion_days_since_ce = as.numeric(difftime(procedure_date, transplant_date, units = "days"))) %>%
+                filter(!procedure_concept_id %in% c(2788707, 2788717, 2788963, 2788973, 2789477, 4125928)) %>%
                 distinct(person_id, record_id, transplant_date, procedure_date, .keep_all= TRUE) %>%
-                select(person_id, record_id, transplant_date, transfusion_date = procedure_date, transfusion_days_since_ce)
+                select(person_id, record_id, transplant_date, transfusion_date = procedure_date, 
+                        transfusion_days_since_ce)
+
     rslt$transfusion %>% view()
 
     rslt$platelet <- rslt$platelet %>% full_join(rslt$transfusion %>% select(-transplant_date), 
                                                 by = c("person_id", "platelet_days_since_ce" = "transfusion_days_since_ce", "record_id")) %>%
-                    mutate( transfusion_days_since_ce = as.numeric(difftime(transfusion_date, transplant_date, units = "days")))
+                    mutate(transfusion_days_since_ce = as.numeric(difftime(transfusion_date, transplant_date, units = "days")))
 
     # get 2nd transplant dates, for patients without chart review data, use EHR data
     # all chart reviews were done
@@ -156,11 +162,11 @@
                                                 platelet_engraftment_date = platelet_engraftment_dates, 
                                                 nadir = nadir), by = "record_id")
     rslt$platelet %>% view()
-    # test case
-    compute_platelet_engraftment(record_ids = "01_0021_cr", 
-                                platelet_var = platelet_max_ct, #either max or mean 
-                                platelet_ct_tbl = rslt$platelet,
-                                cutoff = 20000)
+    # test a single case
+#     compute_platelet_engraftment(record_ids = "01_0021_cr", 
+#                                 platelet_var = platelet_max_ct, #either max or mean 
+#                                 platelet_ct_tbl = rslt$platelet,
+#                                 cutoff = 20000)
     # Determine number of subsets/pages based on the number of unique groups
     num_plot_per_page <- 10
    # missing platelett data
@@ -184,17 +190,85 @@
         pdf_files[[i]] <- generate_platelet_plots(data = rslt$platelet,
                         transplant_px = rslt$transplant_px, 
                         # transfusion_tbl = rslt$transfusion,
-                        page_num = i, num_plot_per_page,
+                        page_num = i, num_plot_per_page = num_plot_per_page,
                         record_ids = record_ids)}
 
     # Combine all PDF files into a single one
-    combined_pdf_filename <- "results/platelet_plots/combined_plots_avg_max.pdf"
+    combined_pdf_filename <- "results/platelet_plots/06052025/combined_platelet_plots_avg.pdf"
     pdf_combine(pdf_files, combined_pdf_filename)
 
     # Remove individual PDF files
     file.remove(pdf_files)
 
     rslt$platelet %>% distinct(record_id, person_id, nadir, platelet_engraftment_date) %>% 
-        output_tbl(name = "platelet_engraftment_dates", local = TRUE, file = TRUE)
+        output_tbl(name = "platelet_engraftment_dates_06052025", local = TRUE, file = TRUE)
 
+    # only plots out patients that Nora said was not accurate
+    review_ids <- read.csv("results/platelet_engraftment_review_Nora.csv")
+    review_platelet_data <- rslt$platelet %>% select(-nadir, -platelet_engraftment_date) %>%
+                                inner_join(review_ids, by = "record_id")
+    num_pages <- ceiling(review_platelet_data %>% distinct(record_id) %>% 
+                        nrow() / num_plot_per_page)
+    pdf_files <- list()
+    # Loop through pages and generate plots
+    for (i in 1:num_pages) {
+        pdf_files[[i]] <- generate_platelet_plots(data = review_platelet_data, # %>% filter(record_id %in% review_ids$record_id),
+                        transplant_px = review_platelet_data$transplant_px, 
+                        page_num = i, num_plot_per_page = num_plot_per_page,
+                        record_ids = review_ids$record_id)}
+
+    # Combine all PDF files into a single one
+    combined_pdf_filename <- "results/platelet_plots/platelet_plots_toreview.pdf"
+    pdf_combine(pdf_files, combined_pdf_filename)
+
+    rslt$platelet %>% filter(record_id %in% review_ids$record_id) %>%
+                select(record_id, site, transfusion_days_since_ce, nadir, platelet_days_since_ce, platelet_mean_ct, platelet_engraftment_date) %>%
+                arrange(record_id, platelet_days_since_ce) %>% 
+                filter(platelet_days_since_ce >= 0) %>%
+                output_tbl("complete_platelet_data_to_review", local = TRUE, file = TRUE)
 }
+
+# 03 & 05 is which site? seem to miss out all transfusion data
+# transfusion code counts by sites
+transfusion_cts <- rslt$study_cohorts %>% 
+        filter(aim_2a_1 | aim_2a_2) %>% 
+        inner_join(results_tbl("covar_platelet_transfusion_px") %>% 
+                # mutate(transfusion_days_since_ce = as.numeric(difftime(procedure_date, transplant_date, units = "days"))) %>%
+                distinct(person_id, record_id, transplant_date, procedure_date, .keep_all= TRUE) %>%
+                select(person_id, record_id, transplant_date, transfusion_date = procedure_date, 
+                        # transfusion_days_since_ce, 
+                        procedure_concept_id, procedure_concept_name), by = c("person_id", "transplant_date")) 
+
+transfusion_cts %>% group_by(procedure_concept_id, procedure_concept_name, site) %>% 
+        summarise(n = n_distinct(person_id)) %>% 
+        pivot_wider(names_from = site, values_from = n, values_fill = 0) %>%
+        output_tbl("transfusion_cts_by_site", local = TRUE, file = TRUE)
+
+
+#######################################################################################
+# final platelet engraftment data before removing RB transfusion codes
+pe_tbl_old <- read.csv("local/platelet_engraftment_dates_old.csv") %>%
+                select(record_id,  
+                platelet_engraftment_date_old = platelet_engraftment_date, 
+                nadir_old = nadir) 
+
+# final platelet engraftment data after removing RB transfusion codes
+pe_tbl <- read.csv("local/platelet_engraftment_dates_06052025.csv") %>%
+                select(record_id, person_id, 
+                platelet_engraftment_day = platelet_engraftment_date, 
+                nadir) 
+
+pe_review_tbl <- read.csv("local/platelet_engraftment_dates_Nora_reviewed_4_8.csv") %>%
+    select(record_id, 
+        platelet_engraftment_day, 
+        nadir,
+        X) %>% 
+        inner_join(pe_tbl %>% select(record_id, person_id), by = "record_id")
+
+# change results for the following records from Nora's inputs
+pe_tbl %>%
+     anti_join(pe_review_tbl, by = "record_id") %>%
+     union(pe_review_tbl %>% select(-X)) %>% 
+     filter(!is.na(platelet_engraftment_day),
+        platelet_engraftment_day >0) %>% 
+        output_tbl("platelet_engraftment_dates_final_06052025", local = TRUE, file = TRUE)

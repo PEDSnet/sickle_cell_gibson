@@ -130,6 +130,7 @@ cox_fit_plot <- function(data, time_var, status_var, covariates, iron_level_var,
   p <- ggsurvplot(plot_fit, data = iron_levels_df, 
                   conf.int = FALSE, #ggtheme = theme_minimal(),
                   legend.labs = iron_levels %>% pull(), #c("Low", "High"),
+                  palette = c("green", "blue"), 
                   legend.title = plot_labels[1],  
                   xlab = "Years", ylab = plot_labels[2], 
                   title = paste(plot_labels[1], sub_group, sep = "-----"), 
@@ -143,6 +144,19 @@ cox_fit_plot <- function(data, time_var, status_var, covariates, iron_level_var,
                               legend.text = element_text(size = axis_text_size))) 
 
   return(list(fit = cox_model, p = p))
+}
+
+site_mask <- function(cohort_tbl){
+  cohort_tbl %>%
+    mutate(site = case_when(site == "chop" ~ "site_1",
+                          site == "colorado" ~ "site_2",
+                          site == "stanford" ~ "site_3",
+                          site == "lurie" ~ "site_4",
+                          site == "seattle" ~ "site_5",
+                          site == "nationwide" ~ "site_6",
+                          site == "nemours" ~ "site_7",
+                          site == "cchmc" ~ "site_8",
+                          TRUE ~ NA)) %>% return()
 }
 ```
 
@@ -223,6 +237,17 @@ cohort_ct <- cohort %>% distinct_ct()
 - Important covariates:
   - History of transplant: we would not have this info if the patients changed their care sites. However, chart reviewers should have caught this? Is it in the cohort eligibility? 
 
+# Site masking: 
+- Site names are masked according to: 
+  - chop: site_1
+  - colorado: site_2
+  - stanford: site_3
+  - lurie: site_4
+  - seattle: site_5
+  - nationwide: site_6
+  - nemours: site_7
+  - cchmc: site_8
+  
 # Overall survival
 
 - match status: Haploidentical, matched related, matched unrelated, mismatched related and mismatched unrelated:
@@ -243,7 +268,7 @@ cohort_ct <- cohort %>% distinct_ct()
 
 ## Aim 2a-2: Overall survival stratified by <span style="color:red">pre-transplant ferritin levels</span>
 ```{r cohort_covars_survival_analysis, echo= FALSE, message=FALSE}
-stat_dataset <- results_tbl("survival_analysis_dataset") %>% collect() %>%
+stat_dataset <- results_tbl("survival_analysis_dataset") %>% collect() %>% 
                   mutate(transplant_type_combined = relevel(factor(transplant_type_combined), ref = "matched related"))
                   # , levels = c("matched related", "matched unrelated", "mismatched related", "mismatched unrelated", "Haploidentical", "Allogeneic: Cord Blood", "autologous/genetherapy", "Unknown")))
 
@@ -254,27 +279,37 @@ stat_dataset_ferritin <-  stat_dataset %>%
             left_join(ferritin_data, by = c("person_id", "transplant_date"))                    
           
 aim_2a_2 <- stat_dataset_ferritin %>% filter(chart_completion, eligibility == "Yes", !is.na(ferritin_pre)) %>%
-                  mutate(ferritin_pre = factor(ferritin_pre, levels = c("low", "moderate", "high")),
-                        ferritin_pre_max = factor(ferritin_pre_max, levels = c("low", "moderate", "high"))) 
+                  mutate(ferritin_pre_3l = factor(ferritin_pre, levels = c("low", "moderate", "high")),
+                        ferritin_pre_max_3l = factor(ferritin_pre_max, levels = c("low", "moderate", "high")))  %>% 
+                    mutate(ferritin_pre = if_else(ferritin_pre %in% c("low", "moderate"), "low-moderate", "high")) %>%
+                    mutate(ferritin_pre = factor(ferritin_pre, levels = c("low-moderate", "high")))
 
 auto_ct <- aim_2a_2 %>% filter(!is.na(survival_time_5yr_censored)) %>% filter(transplant_type_combined == "autologous/genetherapy") %>% nrow()
 unknown_ct <- aim_2a_2 %>% filter(!is.na(survival_time_5yr_censored)) %>% filter(transplant_type_combined == "Unknown") %>% nrow()
 
 pre_ferritin_cox <- aim_2a_2 %>% filter(!is.na(survival_time_5yr_censored)) %>%
-                          select(record_id, ferritin_pre, age_at_ce, gender, graft_manip, transplant_type, scd_type, disease_relapse, graft_fail_date, donor_relation, survival_time_5yr_censored, survival_5yr, second_transplant, transplant_type_combined, graft_fail_5yr, graft_fail_days_since_ce_5yr_censored, has_busulfan, vod, bacteremia, bacteremia_time_1yr_censored)
+                          select(record_id, site, ferritin_pre_val, ferritin_pre, ferritin_pre_3l, ferritin_pre_max_3l, age_at_ce, gender, graft_manip, transplant_type, scd_type, disease_relapse, graft_fail_date, donor_relation, survival_time_5yr_censored, survival_5yr, second_transplant, transplant_type_combined, graft_fail_5yr, graft_fail_days_since_ce_5yr_censored, has_busulfan, vod, 
+                          bacteremia, bacteremia_1yr, bacteremia_time_1yr_censored, 
+                          bacteremia_6mon, bacteremia_time_6mon_censored, 
+                          anc_engraftment_censored, anc_engraftment_day_censored,
+                          platelet_engraftment_censored, platelet_engraftment_day_censored, ferritin_days_pre) %>%
+                          site_mask() %>%
+                          mutate(site = relevel(as.factor(site), ref= "site_1"))
 
 label(pre_ferritin_cox$transplant_type_combined) = "match status"
-table1(~gender + disease_relapse + age_at_ce + transplant_type_combined + ferritin_pre + has_busulfan + scd_type| survival_5yr, 
+label(pre_ferritin_cox$ferritin_pre) = "Pre-transplant ferritin"
+label(pre_ferritin_cox$ferritin_pre_3l) = "Pre-transplant ferritin"
+table1(~gender + disease_relapse + age_at_ce + transplant_type_combined + ferritin_pre + ferritin_pre_3l + has_busulfan + scd_type +site| survival_5yr, 
         data = pre_ferritin_cox %>% mutate(survival_5yr = ifelse(survival_5yr ==1, "Dead", "Survived")), 
-        overall = TRUE, 
+        overall = "Total", 
         caption = "Overall survival at 5-yr following transplant")                          
 ```
 
 ### KM curves:
+#### Low-moderate & high categories
 ```{r os_KM_pre_ferritin}
 km_ferritin_os <- survfit(Surv(survival_time_5yr_censored/365.25, survival_5yr) ~ ferritin_pre,   
-                            data = pre_ferritin_cox %>%
-                            mutate(ferritin_pre = factor(ferritin_pre, levels = c("low", "moderate", "high"))))
+                            data = pre_ferritin_cox)
 
 print(km_ferritin_os)
 
@@ -288,8 +323,58 @@ ggsurvplot(km_ferritin_os,
           xlab = "Time (Years)",   # customize X axis label.
           ylab = "Overall Survival", 
           title = "Kaplan-Meier curves for overall survival using pre-transplant ferritin levels",
+          legend.labs = c("Low-moderate", "High"),    # change legend labels.
+          palette = c("green", "blue"))
+```
+
+#### Low, moderate, & high categories
+```{r os_KM_pre_ferritin_3l}
+km_ferritin_os_3l <- survfit(Surv(survival_time_5yr_censored/365.25, survival_5yr) ~ ferritin_pre_3l,   
+                            data = pre_ferritin_cox)
+
+print(km_ferritin_os)
+
+ggsurvplot(km_ferritin_os_3l,
+          pval = TRUE, conf.int = FALSE,
+          risk.table = TRUE, # Add risk table
+          risk.table.col = "strata", # Change risk table color by groups
+          linetype = "strata", # Change line type by groups
+          surv.median.line = "hv", # Specify median survival
+          ggtheme = theme_bw(), # Change ggplot2 theme
+          xlab = "Time (Years)",   # customize X axis label.
+          ylab = "Overall Survival", 
+          title = "Kaplan-Meier curves for overall survival using pre-transplant ferritin levels",
           legend.labs = c("Low", "Moderate", "High"),    # change legend labels.
           palette = c("red", "green", "blue"))
+```
+
+### Unadjusted overall survival stratified by pre-transplant ferritin levels
+```{r unadj_overall_surv_pre_ferritin_univar, echo= FALSE, message=FALSE, fig.width = 9, fig.height = 6}
+pre_ferritin_cox_1 <- pre_ferritin_cox %>% filter(!(transplant_type_combined %in% c("autologous/genetherapy"))) %>%
+                          mutate(transplant_type_combined = relevel(transplant_type_combined, ref = "matched related")) #%>%
+                          # mutate(site = relevel(as.factor(site), ref = "chop"))
+
+# 0 is censored/survived, 1 is death
+# exclude match_status and graft_manip
+cox_ferritin_os_uni <- coxph(Surv(survival_time_5yr_censored/365.25, survival_5yr) ~ ferritin_pre, 
+                data = pre_ferritin_cox_1)
+
+cox_sum(cox_ferritin_os_uni) %>% prettify_kable()
+```
+
+### Overall survival stratified by pre-transplant ferritin levels, univariate Cox regression analysis
+```{r overall_surv_pre_ferritin_univar, echo= FALSE, message=FALSE, fig.width = 9, fig.height = 6}
+# pre_ferritin_cox %>% group_by(survival_5yr, transplant_type_combined) %>% summarise(n = n_distinct(record_id)) %>% view()
+pre_ferritin_cox_1 <- pre_ferritin_cox %>% filter(!(transplant_type_combined %in% c("autologous/genetherapy"))) %>%
+                          mutate(transplant_type_combined = relevel(transplant_type_combined, ref = "matched related")) #%>%
+                          # mutate(site = relevel(as.factor(site), ref = "chop"))
+
+# 0 is censored/survived, 1 is death
+# exclude match_status and graft_manip
+cox_ferritin_os_uni <- coxph(Surv(survival_time_5yr_censored/365.25, survival_5yr) ~ ferritin_pre + site, 
+                data = pre_ferritin_cox_1)
+
+cox_sum(cox_ferritin_os_uni) %>% prettify_kable()
 ```
 
 ### Multivariate Cox regression analysis: 
@@ -301,6 +386,7 @@ ggsurvplot(km_ferritin_os,
     - Allogeneic: Cord Blood, Matched related (ref), Matched unrelated/Mismatched related/Mismatched Unrelated, & Unknown
     - Removed: autologous/genetherapy (see table above) due to missing obversation in outcomes. 
   - has busulfan: yes or no(ref)
+  - site: chop is the ref site
 
 - **Results**:
   - Increasing age is associated with a lower survival probability (Nora, does this make sense???). Although this association is statistically significant, the clinical impact appears to be minimal. It might be more informative to analyze this by breaking it down into age groups.
@@ -308,36 +394,178 @@ ggsurvplot(km_ferritin_os,
   - Another significant factor is matched unrelated/mismatched unrelated/mismatched related transplant type increased the risk of death by almost 130% compared to match related patients. 
   - Even though not significant, having a high pre-transplant ferritin level almost double of risk of death compared to having a low ferritin level. 
 
+#### Low-moderate & high categories
 ```{r overall_surv_pre_ferritin, echo= FALSE, message=FALSE, fig.width = 9, fig.height = 6}
+# 0 is censored/survived, 1 is death
+# exclude match_status and graft_manip
+cox_ferritin_os <- coxph(Surv(survival_time_5yr_censored/365.25, survival_5yr) ~ ferritin_pre + age_at_ce + gender + transplant_type_combined + has_busulfan + site, 
+                data = pre_ferritin_cox_1)
+
+# visualiza the impact on iron levels
+ferritin_levels_df <- with(pre_ferritin_cox_1,
+               data.frame(ferritin_pre = c("low-moderate", "high"), 
+                          age_at_ce = rep(mean(age_at_ce, na.rm = TRUE), 2),
+                          gender = rep("Female", 2),
+                          transplant_type_combined = rep("matched related",2),
+                          has_busulfan = rep("No", 2),
+                          site = rep("site_1", 2)
+                          )
+               )
+
+plot_title_text_size <- 16
+axis_text_size <- 10
+
+fit <- survfit(cox_ferritin_os, newdata = ferritin_levels_df)
+ggsurvplot(fit, data = ferritin_levels_df, 
+                  conf.int = FALSE, 
+                  legend.labs = c("Low", "High"),
+                  palette = c("green", "blue"), # custom color palette
+                  legend.title = "Pre-transplant ferritin levels", 
+                  xlab = "Years", ylab = "Overall survival probability",
+                  xlim = c(0, 5), ylim = c(0, 1.0), 
+                  risk.table = FALSE,
+                  censor = FALSE, 
+                  ggtheme = theme_classic() + theme(
+    plot.title = element_text(size = plot_title_text_size),    # Title text size
+    axis.title.x = element_text(size = axis_text_size), # X-axis title size
+    axis.title.y = element_text(size = axis_text_size), # Y-axis title size
+    axis.text.x = element_text(size = axis_text_size),  # X-axis labels size
+    axis.text.y = element_text(size = axis_text_size),   # Y-axis labels size
+    legend.title = element_text(size = axis_text_size),    # Legend title size
+    legend.text = element_text(size = axis_text_size))) #, risk.table.title = "test")
+
+# p <- ggsurvplot(fit, data = ferritin_levels_df, 
+#                   conf.int = FALSE, 
+#                   legend.labs = c("Low", "High"),
+#                   palette = c("green", "blue"), # custom color palette
+#                   legend.title = "Pre-transplant ferritin levels", 
+#                   xlab = "Years", ylab = "Overall survival probability",
+#                   xlim = c(0, 5), ylim = c(0, 1.0), 
+#                   risk.table = FALSE,
+#                   censor = FALSE, 
+#                   ggtheme = theme_classic() + theme(
+#     plot.title = element_text(size = plot_title_text_size),    # Title text size
+#     axis.title.x = element_text(size = axis_text_size), # X-axis title size
+#     axis.title.y = element_text(size = axis_text_size), # Y-axis title size
+#     axis.text.x = element_text(size = axis_text_size),  # X-axis labels size
+#     axis.text.y = element_text(size = axis_text_size),   # Y-axis labels size
+#     legend.title = element_text(size = axis_text_size),    # Legend title size
+#     legend.text = element_text(size = axis_text_size))) #, risk.table.title = "test")
+
+# ggsave("manuscript/figures/overallsurv_ferritin.png", p$plot, width = 7, height = 4, dpi = 600)
+
+cox_sum(cox_ferritin_os) %>% prettify_kable()
+```
+
+### Spline fit for univariate Cox model for overall survival 
+- The first plot displays the exact HR values without smoothing
+
+```{r overall_surv_pre_ferritin_spline, echo= FALSE, message=FALSE, fig.width = 9, fig.height = 6}
 # pre_ferritin_cox %>% group_by(survival_5yr, transplant_type_combined) %>% summarise(n = n_distinct(record_id)) %>% view()
 pre_ferritin_cox_1 <- pre_ferritin_cox %>% filter(!(transplant_type_combined %in% c("autologous/genetherapy"))) %>%
-                          mutate(transplant_type_combined = relevel(transplant_type_combined, ref = "matched related"))
+                          mutate(transplant_type_combined = relevel(transplant_type_combined, ref = "matched related")) #%>%
+                          # mutate(site = relevel(as.factor(site), ref = "chop"))
 
 # 0 is censored/survived, 1 is death
 # exclude match_status and graft_manip
-cox_ferritin_os <- coxph(Surv(survival_time_5yr_censored/365.25, survival_5yr) ~ ferritin_pre + age_at_ce + gender + transplant_type_combined + has_busulfan, 
+cox_ferritin_os <- coxph(Surv(survival_time_5yr_censored/365.25, survival_5yr) ~ ferritin_pre, 
                 data = pre_ferritin_cox_1)
 
-# pre_ferritin_cox_1 %>% group_by(ferritin_pre, gender, transplant_type_combined, has_busulfan) %>%
-#                       summarise(n_distinct(record_id))
+os_cox_spline <- function(min_ferritin = 500,
+                          max_ferritin = 5000,
+                          cohort_tbl){
+  # univariate fit for varying ferritin cut-off
+  res = data.frame()
+  for (ferritin in seq(min_ferritin, max_ferritin, by = 20)){
+    cohort_tbl <- cohort_tbl %>%
+                    mutate(ferritin_level = if_else(ferritin_pre_val <= ferritin, "low", "high")) %>%
+                    mutate(ferritin_level = relevel(as.factor(ferritin_level), ref = "low"))
+    
+    cox_ferritin_os <- coxph(Surv(survival_time_5yr_censored/365.25, survival_5yr) ~ ferritin_level, 
+                data = cohort_tbl)
+    cox_sum <- summary(cox_ferritin_os)
+    res_1 <- cbind.data.frame(cox_sum$conf.int, cox_sum$coefficients) %>%
+        rename(HR = "exp(coef)", lower = "lower .95", upper = "upper .95", p_val = "Pr(>|z|)") %>%
+        select("HR", lower, upper, "p_val") %>% 
+        mutate(ferritin_cutoff = ferritin)
+    rownames(res_1) <- NULL
+    res <- rbind.data.frame(res, res_1)
+  }
+
+  return(res)
+}
+# perform spline fit
+res <- os_cox_spline(cohort_tbl = pre_ferritin_cox_1)
+res %>% colnames()
+
+res %>% prettify_kable()
+
+ggplot(res, aes(y = HR, x = ferritin_cutoff)) +
+  geom_point() + 
+  geom_ribbon(aes(ymin = lower, ymax = upper), fill = "lightblue", alpha = 0.5) +
+  geom_line(aes(y = HR), color = "blue", size = 1) +
+  geom_hline(yintercept = 1, linetype = "dashed", color = "darkred") +
+  labs(x = "Ferritin cut-off (ng/mL)", y = "HR", title = "True HR estimates with 95% Confidence Interval") +
+  theme_minimal()
+
+# Fit smooth splines for lower and upper bounds
+lower_spline <- with(res, smooth.spline(ferritin_cutoff, lower, spar = 0.7))
+upper_spline <- with(res, smooth.spline(ferritin_cutoff, upper, spar = 0.7))
+hr_spline <- with(res, smooth.spline(ferritin_cutoff, HR, spar = 0.7))
+
+# Create a new x grid for smoother curves
+x_smooth <- seq(min(res$ferritin_cutoff), max(res$ferritin_cutoff), length.out = 200)
+
+# Predict smoothed values
+res_smooth <- data.frame(
+  x = x_smooth,
+  lower = predict(lower_spline, x_smooth)$y,
+  upper = predict(upper_spline, x_smooth)$y,
+  HR = predict(hr_spline, x_smooth)$y
+)
+
+p <- ggplot(res_smooth, aes(x = x)) +
+  geom_ribbon(aes(ymin = lower, ymax = upper), fill = "lightblue", alpha = 0.5) +
+  geom_line(aes(y = HR), color = "red", size = 1) +
+  geom_hline(yintercept = 1, linetype = "dashed", color = "darkred") +
+  labs(x = "Ferritin cut-off (ng/mL)", y = "Hazard Ratios (HR)"
+  #title = "Smoothed Spline HR with Varying Ferritin Cut-offs for Univariate Cox Model"
+  ) + 
+  theme_classic() + 
+  theme(
+    axis.title.x = element_text(size = 20),  # X-axis label size
+    axis.text.x = element_text(size = 15),  
+    axis.text.y = element_text(size = 15),  
+    axis.title.y = element_text(size = 20)   # Y-axis label size
+  )
+
+# ggsave("../manuscript/figures/overallsur_ferritin_spline.png", p, width = 14, height = 8, dpi = 600)
+
+```
+
+#### Low, moderate, & high categories
+```{r overall_surv_pre_ferritin_3l, echo= FALSE, message=FALSE, fig.width = 9, fig.height = 6}
+
+# 0 is censored/survived, 1 is death
+# exclude match_status and graft_manip
+cox_ferritin_os_3l <- coxph(Surv(survival_time_5yr_censored/365.25, survival_5yr) ~ ferritin_pre_3l + age_at_ce + gender + transplant_type_combined + has_busulfan +site, 
+                data = pre_ferritin_cox_1)
+
 # visualiza the impact on iron levels
 ferritin_levels_df <- with(pre_ferritin_cox_1,
-               data.frame(ferritin_pre = c("low", "moderate", "high"), 
+               data.frame(ferritin_pre_3l = c("low", "moderate", "high"), 
                           age_at_ce = rep(mean(age_at_ce, na.rm = TRUE), 3),
                           gender = rep("Female", 3),
                           transplant_type_combined = rep("matched related",3),
-                          has_busulfan = rep("No", 3)
-                          # match_status = rep("Cord Blood", 3), 
-                          # disease_relapse = rep("No", 3), 
-                          # graft_manip = rep("No", 3), 
-                          # scd_type = rep("beta thalassemia major", 3)
+                          has_busulfan = rep("No", 3),
+                          site = rep("site_1", 3)
                           )
                )
 
 plot_title_text_size <- 20
 axis_text_size <- 14
 
-fit <- survfit(cox_ferritin_os, newdata = ferritin_levels_df)
+fit <- survfit(cox_ferritin_os_3l, newdata = ferritin_levels_df)
 ggsurvplot(fit, data = ferritin_levels_df, 
                   conf.int = FALSE, 
                   legend.labs = c("Low", "Moderate", "High"),
@@ -355,86 +583,71 @@ ggsurvplot(fit, data = ferritin_levels_df,
     legend.title = element_text(size = axis_text_size),    # Legend title size
     legend.text = element_text(size = axis_text_size))) #, risk.table.title = "test")
 
-# output overall survival curves
-# survfit2(res.cox) %>% ggsurvfit() +
-#   labs(
-#     x = "Years",
-#     y = "Overall survival probability",
-#     title = "Overall survival analysis pre-transplant ferritin"
-#     ) + 
-#   add_confidence_interval() +
-#   add_risktable()
+cox_sum(cox_ferritin_os_3l) %>% prettify_kable()
 ```
 
-```{r overall_surv_pre_ferritin_sum, echo= FALSE, message=FALSE}
-# summary(res.cox)
-cox_sum(cox_ferritin_os) %>% prettify_kable()
+### subgroup analysis, overall survival, low-moderate vs high ferritin levels
+#### aplastic anemia  --- Overall survival, low-moderate vs high ferritin levels
+```{r pre_ferritin_OS_disease_subgroup_aa}
+table1(~age_at_ce + gender + transplant_type_combined + ferritin_pre + has_busulfan + site| survival_5yr, 
+        data = pre_ferritin_cox %>% mutate(survival_5yr = ifelse(survival_5yr ==1, "Dead", "Survived")) %>%
+                filter(scd_type == "aplastic anemia"), 
+        overall = FALSE, 
+        caption = "Overall survival at 5-yr following transplant --- aplastic anemia")                          
+
+pre_ferritin_os_aa <- pre_ferritin_cox %>%
+    filter(!(transplant_type_combined %in% c("Unknown", "autologous/genetherapy"))) %>%
+    cox_fit_plot(time_var = "survival_time_5yr_censored", 
+                status_var = "survival_5yr", 
+                covariates = c("ferritin_pre", "age_at_ce", "gender", "transplant_type_combined", "has_busulfan"),
+                iron_level_var = "ferritin_pre", 
+                plot_labels = c("Pre-transplant ferritin levels", "Overall survival probability"),
+                sub_group = "aplastic anemia")
+print(pre_ferritin_os_aa$p)
+cox_sum(pre_ferritin_os_aa$fit) %>% prettify_kable()
 ```
 
-## Aim 2a-2: Overall survival stratified by <span style="color:red">pre-transplant ferritin levels with binary low-moderate and high levels</span>
-### KM curves:
-```{r os_KM_pre_ferritin_binary}
-km_ferritin_os_binary <- survfit(Surv(survival_time_5yr_censored/365.25, survival_5yr) ~ ferritin_pre,   
-                    data = pre_ferritin_cox %>% 
-                    mutate(ferritin_pre = if_else(ferritin_pre %in% c("low", "moderate"), "low-moderate", "high")) %>%
-                    mutate(ferritin_pre = factor(ferritin_pre, levels = c("low-moderate", "high"))))
+### sickle cell disease  --- Overall survival, low-moderate vs high ferritin levels
+```{r pre_ferritin_OS_disease_subgroup_scd}
+table1(~age_at_ce + gender + transplant_type_combined + ferritin_pre + has_busulfan + site| survival_5yr, 
+        data = pre_ferritin_cox %>% mutate(survival_5yr = ifelse(survival_5yr ==1, "Dead", "Survived")) %>%
+                filter(scd_type == "sickle cell disease"),# %>%
+                # filter(!(transplant_type_combined %in% c("autologous/genetherapy", "Unknown"))), 
+        overall = FALSE, 
+        caption = "Overall survival at 5-yr following transplant --- sickle cell disease")                          
 
-ggsurvplot(km_ferritin_os_binary,
-          pval = TRUE, conf.int = FALSE,
-          risk.table = TRUE, # Add risk table
-          risk.table.col = "strata", # Change risk table color by groups
-          linetype = "strata", # Change line type by groups
-          surv.median.line = "hv", # Specify median survival
-          ggtheme = theme_bw(), # Change ggplot2 theme
-          xlab = "Time (Years)",   # customize X axis label.
-          ylab = "Overall Survival", 
-          title = "Kaplan-Meier curves for overall survival using pre-transplant ferritin levels",
-          legend.labs = c("Low-moderate", "High"),    # change legend labels.
-          palette = c("orange", "blue"))
+pre_ferritin_os_scd <- pre_ferritin_cox %>%
+    # filter(!(transplant_type_combined %in% c("autologous/genetherapy", "Unknown"))) %>%
+    cox_fit_plot(time_var = "survival_time_5yr_censored", 
+                status_var = "survival_5yr", 
+                covariates = c("ferritin_pre", "age_at_ce", "gender", "has_busulfan","transplant_type_combined"),
+                iron_level_var = "ferritin_pre", 
+                plot_labels = c("Pre-transplant ferritin levels", "Overall survival probability"),
+                sub_group = "sickle cell disease")
+
+print(pre_ferritin_os_scd$p)
+cox_sum(pre_ferritin_os_scd$fit) %>% prettify_kable()
 ```
 
-### Multivariate Cox regression analysis: 
-```{r overall_survival_pre_ferritin_binary, echo= FALSE, message=FALSE}
-label(pre_ferritin_cox$transplant_type_combined) = "match status"
-table1(~gender + disease_relapse + age_at_ce + transplant_type_combined + ferritin_pre + has_busulfan + scd_type| survival_5yr, 
-        data = pre_ferritin_cox %>% 
-              mutate(survival_5yr = ifelse(survival_5yr ==1, "Dead", "Survived")) %>%
-              mutate(ferritin_pre = if_else(ferritin_pre %in% c("low", "moderate"), "low-moderate", "high")),  
-        overall = TRUE, 
-        caption = "Overall survival at 5-yr following transplant")    
+### beta thalassemia major  --- Overall survival, low-moderate vs high ferritin levels
+```{r pre_ferritin_OS_disease_subgroup_btm}
+table1(~age_at_ce + gender + transplant_type_combined + ferritin_pre + has_busulfan + site| survival_5yr, 
+        data = pre_ferritin_cox %>% mutate(survival_5yr = ifelse(survival_5yr ==1, "Dead", "Survived")) %>%
+                filter(scd_type == "beta thalassemia major"), 
+        overall = FALSE, 
+        caption = "Overall survival at 5-yr following transplant --- beta thalassemia major")     
 
-# 0 is censored/survived, 1 is death
-# exclude match_status and graft_manip
-cox_ferritin_os_binary <- coxph(Surv(survival_time_5yr_censored/365.25, survival_5yr) ~ ferritin_pre + age_at_ce + gender + transplant_type_combined + has_busulfan, 
-                data = pre_ferritin_cox_1 %>%
-                        mutate(ferritin_pre = if_else(ferritin_pre %in% c("low", "moderate"), "low-moderate", "high")))
+pre_ferritin_os_btm <- pre_ferritin_cox %>%
+    filter(!(transplant_type_combined %in% c("autologous/genetherapy"))) %>%
+    cox_fit_plot(time_var = "survival_time_5yr_censored", 
+                status_var = "survival_5yr", 
+                covariates = c("ferritin_pre", "age_at_ce", "gender", "has_busulfan", "transplant_type_combined"),
+                iron_level_var = "ferritin_pre", 
+                plot_labels = c("Pre-transplant ferritin levels", "Overall survival probability"),
+                sub_group = "beta thalassemia major")
 
-ferritin_levels_df_binary <- with(pre_ferritin_cox_1 %>% mutate(ferritin_pre = if_else(ferritin_pre %in% c("low", "moderate"), "low-moderate", "high")),
-               data.frame(ferritin_pre = c("low-moderate", "high"), 
-                          age_at_ce = rep(mean(age_at_ce, na.rm = TRUE), 2),
-                          gender = rep("Female", 2),
-                          transplant_type_combined = rep("matched related",2),
-                          has_busulfan = rep("No", 2)))
-
-fit <- survfit(cox_ferritin_os_binary, newdata = ferritin_levels_df_binary)
-ggsurvplot(fit, data = ferritin_levels_df_binary, 
-                  conf.int = FALSE, 
-                  legend.labs = c("Low-moderate", "High"),
-                  palette = c("orange", "blue"), # custom color palette
-                  legend.title = "Pre-transplant ferritin levels", 
-                  xlab = "Years", ylab = "Overall survival probability",
-                  xlim = c(0, 5), ylim = c(0.7, 1.0), 
-                  risk.table = TRUE,
-                  ggtheme = theme(
-    plot.title = element_text(size = plot_title_text_size),    # Title text size
-    axis.title.x = element_text(size = axis_text_size), # X-axis title size
-    axis.title.y = element_text(size = axis_text_size), # Y-axis title size
-    axis.text.x = element_text(size = axis_text_size),  # X-axis labels size
-    axis.text.y = element_text(size = axis_text_size),   # Y-axis labels size
-    legend.title = element_text(size = axis_text_size),    # Legend title size
-    legend.text = element_text(size = axis_text_size))) #, risk.table.title = "test")
-
-cox_sum(cox_ferritin_os_binary) %>% prettify_kable()
+print(pre_ferritin_os_btm$p)
+cox_sum(pre_ferritin_os_btm$fit) %>% prettify_kable()
 ```
 
 ## Aim 2a-1: Overall survival stratified by <span style="color:red">pre-transplant LIC levels</span>
@@ -454,7 +667,11 @@ aim_2a_1 <- stat_dataset_LIC %>% filter(chart_completion, eligibility == "Yes", 
                 mutate(LIC_level_3_max_binary = factor(LIC_level_3_max_binary, levels = c("low", "high")))
 
 pre_LIC_cox <- aim_2a_1 %>% filter(!is.na(survival_time_5yr_censored)) %>% 
-                          select(record_id, LIC_level_3_binary, LIC_level_1_binary, LIC_level_3_max_binary, age_at_ce, gender, graft_manip, transplant_type, scd_type, disease_relapse, graft_fail_date, donor_relation, survival_time_5yr_censored, survival_5yr, second_transplant, transplant_type_combined, graft_fail_5yr, graft_fail_days_since_ce_5yr_censored, has_busulfan, site, vod, bacteremia, bacteremia_time_1yr_censored, LIC)
+                          select(record_id, site, LIC_level_3_binary, LIC_level_1_binary, LIC_level_3_max_binary, age_at_ce, gender, graft_manip, transplant_type, scd_type, disease_relapse, graft_fail_date, donor_relation, survival_time_5yr_censored, survival_5yr, second_transplant, transplant_type_combined, graft_fail_5yr, graft_fail_days_since_ce_5yr_censored, has_busulfan, site, vod, bacteremia, bacteremia_time_1yr_censored, bacteremia_6mon, bacteremia_time_6mon_censored, bacteremia_1yr, LIC, anc_engraftment_day, anc_engraftment_censored, anc_engraftment_day_censored,
+                          platelet_engraftment_censored, platelet_engraftment_day_censored, LIC, death_date, LIC_days_since_transplant) %>%
+                          site_mask() %>%
+                          mutate(site = relevel(as.factor(site), ref = "site_1"))
+
 # pre_LIC_cox %>% group_by(survival_5yr, transplant_type_combined) %>% summarise(n = n_distinct(record_id)) %>% view()
 
 auto_ct <- aim_2a_1 %>% filter(!is.na(survival_time_5yr_censored)) %>% filter(transplant_type_combined == "autologous/genetherapy") %>% nrow()
@@ -462,7 +679,7 @@ unknown_ct <- aim_2a_1 %>% filter(!is.na(survival_time_5yr_censored)) %>% filter
 
 label(pre_LIC_cox$transplant_type_combined) = "match status"
 label(pre_LIC_cox$LIC_level_1_binary) = "pre-transplant LIC-level"
-table1(~gender + disease_relapse + age_at_ce + transplant_type_combined + LIC_level_1_binary + has_busulfan + scd_type| survival_5yr, 
+table1(~gender + disease_relapse + age_at_ce + transplant_type_combined + LIC_level_1_binary + has_busulfan + scd_type + site| survival_5yr, 
         data = pre_LIC_cox %>% mutate(survival_5yr = ifelse(survival_5yr == 1, "Dead", "Survived")), 
         overall = TRUE, 
         caption = "Overall survival at 5-yr following transplant")
@@ -490,7 +707,23 @@ ggsurvplot(km_LIC_os,
           ylab = "Overall Survival", 
           title = "Kaplan-Meier curves for overall survival using pre-transplant LIC levels",
           legend.labs = c("Low", "High"),    # change legend labels.
-          palette = c("red", "blue"))
+          palette = c("green", "blue"))
+```
+
+### Unadjusted overall survival
+```{r unadj_overall_surv_pre_LIC_univar, echo= FALSE, message=FALSE, fig.width = 9, fig.height = 6}
+cox_LIC_os_uni <- coxph(Surv(survival_time_5yr_censored/365.25, survival_5yr) ~ LIC_level_1_binary, 
+                data = pre_LIC_cox_1)
+
+cox_sum(cox_LIC_os_uni) %>% prettify_kable()
+```
+
+### Overall survival stratified by pre-transplant LIC levels adjusted for site
+```{r overall_surv_pre_LIC_univar, echo= FALSE, message=FALSE, fig.width = 9, fig.height = 6}
+cox_LIC_os_uni <- coxph(Surv(survival_time_5yr_censored/365.25, survival_5yr) ~ LIC_level_1_binary +  site, 
+                data = pre_LIC_cox_1)
+
+cox_sum(cox_LIC_os_uni) %>% prettify_kable()
 ```
 
 ### Multivariate Cox regression analysis: 
@@ -510,7 +743,7 @@ ggsurvplot(km_LIC_os,
 ```{r overall_surv_pre_LIC, echo= FALSE, message=FALSE, fig.width = 9, fig.height = 6}
 # 0 is censored/survived, 1 is death
 # exclude match_status and graft_manip
-cox_LIC_os <- coxph(Surv(survival_time_5yr_censored/365.25, survival_5yr) ~ LIC_level_1_binary + age_at_ce + gender + transplant_type_combined + has_busulfan, 
+cox_LIC_os <- coxph(Surv(survival_time_5yr_censored/365.25, survival_5yr) ~ LIC_level_1_binary + age_at_ce + gender + transplant_type_combined + has_busulfan + site, 
                 data = pre_LIC_cox_1)
 
 # visualiza the impact on iron levels
@@ -519,18 +752,20 @@ LIC_levels_df <- with(pre_LIC_cox_1,
                           age_at_ce = rep(mean(age_at_ce, na.rm = TRUE), 2),
                           gender = rep("Female", 2),
                           transplant_type_combined = rep("matched related",2),
-                          has_busulfan = rep("No", 2)
+                          has_busulfan = rep("No", 2),
+                          site = rep("site_1", 2)
                           ))
 
 fit <- survfit(cox_LIC_os, newdata = LIC_levels_df)
 ggsurvplot(fit, data = LIC_levels_df, 
                   conf.int = FALSE, 
                   legend.labs = c("Low", "High"),
+                  censor = FALSE, 
                   legend.title = "Pre-transplant LIC levels", 
-                  palette = c("red", "blue"), # custom color palette
+                  palette = c("green", "blue"), # custom color palette
                   xlab = "Years", ylab = "Overall survival probability",
-                  xlim = c(0, 5), ylim = c(0.7, 1.0),
-                  ggtheme = theme(plot.title = element_text(size = plot_title_text_size),    # Title text size
+                  xlim = c(0, 5), ylim = c(0, 1.0),
+                  ggtheme = theme_classic() + theme(plot.title = element_text(size = plot_title_text_size),    # Title text size
                               axis.title.x = element_text(size = axis_text_size), # X-axis title size
                               axis.title.y = element_text(size = axis_text_size), # Y-axis title size
                               axis.text.x = element_text(size = axis_text_size),  # X-axis labels size
@@ -538,12 +773,100 @@ ggsurvplot(fit, data = LIC_levels_df,
                               legend.title = element_text(size = axis_text_size),    # Legend title size
                               legend.text = element_text(size = axis_text_size)), 
                   risk.table = FALSE) #, risk.table.title = "test")
-
+ggsurvplot(fit, data = LIC_levels_df, 
+                  conf.int = FALSE, 
+                  legend.labs = c("Low", "High"),
+                  legend.title = "Pre-transplant LIC levels", 
+                  palette = c("green", "blue"), # custom color palette
+                  xlab = "Years", ylab = "Overall survival probability",
+                  xlim = c(0, 5), ylim = c(0, 1.0),
+                  censor = FALSE, 
+                  ggtheme = theme_classic() + theme(plot.title = element_text(size = plot_title_text_size),    # Title text size
+                              axis.title.x = element_text(size = axis_text_size), # X-axis title size
+                              axis.title.y = element_text(size = axis_text_size), # Y-axis title size
+                              axis.text.x = element_text(size = axis_text_size),  # X-axis labels size
+                              axis.text.y = element_text(size = axis_text_size),   # Y-axis labels size
+                              legend.title = element_text(size = axis_text_size),    # Legend title size
+                              legend.text = element_text(size = axis_text_size)), 
+                  risk.table = FALSE) #, risk.table.title = "test")
+# ggsave("manuscript/figures/overallsurv_LIC.png", p$plot, width = 7, height = 4, dpi = 600)
 ```
 
 ```{r overall_surv_pre_LIC_sum, echo= FALSE, message=FALSE}
 # summary(res.cox)
 cox_sum(cox_LIC_os) %>% prettify_kable()
+```
+
+### subgroup analysis --- Overall survival pre-transplant LIC binary levels
+#### sickle cell disease --- Overall survival for pre-transplant LIC binary levels
+
+- In this subgroup analysis: I have to remove the transplant type from the list of covariates. 
+- The LIC cut-off for high vs. low is 8
+
+```{r pre_LIC_binary_OS_disease_subgroup_scd}
+table1(~age_at_ce + gender + transplant_type_combined + LIC_level_1_binary + has_busulfan + site| survival_5yr, 
+        data = pre_LIC_cox %>% mutate(survival_5yr = ifelse(survival_5yr ==1, "Dead", "Survived")) %>%
+                filter(scd_type == "sickle cell disease"), 
+        overall = FALSE, 
+        caption = "Overall survival at 5-yr following transplant --- sickle cell disease")     
+
+pre_LIC_os_scd <- pre_LIC_cox %>%
+    # filter(!(transplant_type_combined %in% c("mismatched related", "mismatched unrelated", "autologous/genetherapy"))) %>%
+    cox_fit_plot(time_var = "survival_time_5yr_censored", 
+                status_var = "survival_5yr", 
+                covariates = c("LIC_level_1_binary", "age_at_ce", "gender", "has_busulfan"),
+                iron_level_var = "LIC_level_1_binary", 
+                plot_labels = c("Pre-transplant LIC binary levels", "Overall survival probability"),
+                sub_group = "sickle cell disease")
+
+print(pre_LIC_os_scd$p)
+cox_sum(pre_LIC_os_scd$fit) %>% prettify_kable()
+```
+
+#### aplastic anemia --- Overall survival for pre-transplant LIC binary levels
+
+- In this subgroup analysis: I have to remove the transplant type from the list of covariates. 
+
+```{r pre_LIC_binary_OS_disease_subgroup_aa}
+table1(~age_at_ce + gender + transplant_type_combined + LIC_level_1_binary + has_busulfan + site| survival_5yr, 
+        data = pre_LIC_cox %>% mutate(survival_5yr = ifelse(survival_5yr ==1, "Dead", "Survived")) %>%
+                filter(scd_type == "aplastic anemia"), 
+        overall = FALSE, 
+        caption = "Overall survival at 5-yr following transplant --- aplastic anemia")     
+
+pre_LIC_os_aa <- pre_LIC_cox %>%
+    # filter((transplant_type_combined == "matched unrelated/mismatched unrelated/mismatched related")) %>% distinct(transplant_type_combined)
+    cox_fit_plot(time_var = "survival_time_5yr_censored", 
+                status_var = "survival_5yr", 
+                covariates = c("LIC_level_1_binary", "age_at_ce", "gender", "has_busulfan"),
+                iron_level_var = "LIC_level_1_binary", 
+                plot_labels = c("Pre-transplant LIC binary levels", "Overall survival probability"),
+                sub_group = "aplastic anemia")
+
+print(pre_LIC_os_aa$p)
+cox_sum(pre_LIC_os_aa$fit) %>% prettify_kable()
+```
+
+#### beta thalassemia major  --- Overall survival for pre-transplant LIC binary levels
+
+```{r pre_LIC_binary_OS_disease_subgroup_btm}
+table1(~age_at_ce + gender + transplant_type_combined + LIC_level_1_binary + has_busulfan + site| survival_5yr, 
+        data = pre_LIC_cox %>% mutate(survival_5yr = ifelse(survival_5yr ==1, "Dead", "Survived")) %>%
+                filter(scd_type == "beta thalassemia major"), 
+        overall = FALSE, 
+        caption = "Overall survival at 5-yr following transplant --- beta thalassemia major")     
+
+pre_LIC_os_btm <- pre_LIC_cox %>%
+    filter(!(transplant_type_combined %in% c("autologous/genetherapy"))) %>%
+    cox_fit_plot(time_var = "survival_time_5yr_censored", 
+                status_var = "survival_5yr", 
+                covariates = c("LIC_level_1_binary", "age_at_ce", "gender", "has_busulfan", "transplant_type_combined"),
+                iron_level_var = "LIC_level_1_binary", 
+                plot_labels = c("Pre-transplant LIC binary levels", "Overall survival probability"),
+                sub_group = "beta thalassemia major")
+
+print(pre_LIC_os_btm$p)
+cox_sum(pre_LIC_os_btm$fit) %>% prettify_kable()
 ```
 
 # Graft failure
@@ -554,7 +877,7 @@ unknown_ct <- pre_ferritin_cox %>% filter(!is.na(graft_fail_days_since_ce_5yr_ce
 label(pre_ferritin_cox$transplant_type_combined) = "match status"
 label(pre_ferritin_cox$survival_5yr) = "Dies within 5 years of post-transplant"
 
-table1(~gender + age_at_ce + transplant_type_combined + ferritin_pre + has_busulfan + survival_5yr + scd_type| graft_fail_5yr, 
+table1(~gender + age_at_ce + transplant_type_combined + ferritin_pre + has_busulfan + survival_5yr + scd_type + site| graft_fail_5yr, 
         data = pre_ferritin_cox %>% mutate(graft_fail_5yr = ifelse(graft_fail_5yr ==1, "Graft failure", "Graft failure free")) %>%
         mutate(survival_5yr = ifelse(survival_5yr == 1, "No", "Yes")), 
         overall = FALSE, 
@@ -563,7 +886,7 @@ table1(~gender + age_at_ce + transplant_type_combined + ferritin_pre + has_busul
 table1(~ferritin_pre| graft_fail_5yr + scd_type, 
         data = pre_ferritin_cox %>% mutate(graft_fail_5yr = ifelse(graft_fail_5yr ==1, "Graft failure", "Graft failure free")) %>%
         mutate(survival_5yr = ifelse(survival_5yr == 1, "No", "Yes")), 
-        overall = TRUE, 
+        overall = FALSE, 
         caption = "Graft failure 5-yr following transplant for subgroups")                          
 ```
 
@@ -608,7 +931,7 @@ pre_ferritin_cox_2 <- pre_ferritin_cox %>%
 # legend(2*12, .02, c("low ferritin", "moderate ferritin", "high ferritin"), 
 #       col = c("red", "blue", "black"), lty = "solid")
 
-compRisk_ferritin_gf <- coxph(Surv(graft_fail_days_since_ce_5yr_censored/30, graft_fail_5yr) ~ ferritin_pre + age_at_ce + gender + has_busulfan  + transplant_type_combined, 
+compRisk_ferritin_gf <- coxph(Surv(graft_fail_days_since_ce_5yr_censored/30, graft_fail_5yr) ~ ferritin_pre + age_at_ce + gender + has_busulfan  + transplant_type_combined + site, 
                 data = pre_ferritin_cox_2, 
                 id = record_id)
 
@@ -657,7 +980,9 @@ cox_sum(compRisk_ferritin_gf) %>% prettify_kable()
 <span style="background-color: #FFFF00"> Nora: looking at this summary, it doesn't look like there is any association between transplant type and busulfan. </span>
 
 ```{r graft_failure_pre_ferritin_transplant_type_sum, message = FALSE}
-table1(~ transplant_type_combined| has_busulfan, data = pre_ferritin_cox_2)
+table1(~ transplant_type_combined| has_busulfan, 
+        data = pre_ferritin_cox_2 %>%
+                  mutate(has_busulfan = if_else(has_busulfan == "No", "No busulfan", "Busulfan")))
 ```
 
 ### visualize graft failure probability
@@ -706,8 +1031,7 @@ pre_ferritin_cox_2_expanded <- expand.covs(pre_ferritin_cox_2_long, "ferritin_pr
 # iv. adding a covariate by cause interactions ccr5 * factor(trans)
 # check out all of these senarios: if the interactions is significant, maybe we dont want to remove it
 
-ferritin_cp <- coxph(Surv(time/365.25, status) ~ ferritin_premoderate.1 + #ferritin_pre +
-                                  ferritin_premoderate.2 +
+ferritin_cp <- coxph(Surv(time/365.25, status) ~ 
                                   ferritin_prehigh.1 + ferritin_prehigh.2 + 
                                   gender + 
                                   age_at_ce + gender + has_busulfan  + transplant_type_combined + 
@@ -718,10 +1042,10 @@ ferritin_cp <- coxph(Surv(time/365.25, status) ~ ferritin_premoderate.1 + #ferri
 # Data to predict
 # in this expanded dataset ferritin_premoderate.1 means "transition 1": event-free to graft-failure 
 
-f_low <- data.frame(
+f_low_moderate <- data.frame(
   # ferritin_pre = c("low", "low"),
-  ferritin_premoderate.1 = c(0, 0),
-  ferritin_premoderate.2 = c(0, 0),
+  # ferritin_premoderate.1 = c(0, 0),
+  # ferritin_premoderate.2 = c(0, 0),
   ferritin_prehigh.1 = c(0, 0),
   ferritin_prehigh.2 = c(0, 0),
   age_at_ce = c(10, 10), 
@@ -732,24 +1056,24 @@ f_low <- data.frame(
   strata = c(1, 2)
 )
 
-f_moderate <- data.frame(
-  # ferritin_pre = c("moderate", "moderate"),
-  ferritin_premoderate.1 = c(1, 0),
-  ferritin_premoderate.2 = c(0, 1),
-  ferritin_prehigh.1 = c(0, 0),
-  ferritin_prehigh.2 = c(0, 0),
-  age_at_ce = c(10, 10), 
-  gender = c("Female", "Female"),
-  has_busulfan = c("No", "No"),  
-  transplant_type_combined = c("matched related", "matched related"),
-  trans = c(1, 2), 
-  strata = c(1, 2)
-)
+# f_moderate <- data.frame(
+#   # ferritin_pre = c("moderate", "moderate"),
+#   # ferritin_premoderate.1 = c(1, 0),
+#   # ferritin_premoderate.2 = c(0, 1),
+#   ferritin_prehigh.1 = c(0, 0),
+#   ferritin_prehigh.2 = c(0, 0),
+#   age_at_ce = c(10, 10), 
+#   gender = c("Female", "Female"),
+#   has_busulfan = c("No", "No"),  
+#   transplant_type_combined = c("matched related", "matched related"),
+#   trans = c(1, 2), 
+#   strata = c(1, 2)
+# )
 
 f_high <- data.frame(
   # ferritin_pre = c("high", "high"),
-  ferritin_premoderate.1 = c(0, 0),
-  ferritin_premoderate.2 = c(0, 0),
+  # ferritin_premoderate.1 = c(0, 0),
+  # ferritin_premoderate.2 = c(0, 0),
   ferritin_prehigh.1 = c(1, 0),
   ferritin_prehigh.2 = c(0, 1),
   age_at_ce = c(10, 10), 
@@ -761,25 +1085,25 @@ f_high <- data.frame(
 )
 
 # Make msfit object for each ferritin level
-msf.f_low <- msfit(object = ferritin_cp, newdata = f_low, trans = tmat)
-msf.f_moderate <- msfit(object = ferritin_cp, newdata = f_moderate, trans = tmat)
+msf.f_low_moderate <- msfit(object = ferritin_cp, newdata = f_low_moderate, trans = tmat)
+# msf.f_moderate <- msfit(object = ferritin_cp, newdata = f_moderate, trans = tmat)
 msf.f_high <- msfit(object = ferritin_cp, newdata = f_high, trans = tmat)
 
 # Make probtrans objects for each ferritin level
-pt.f_low <- probtrans(msf.f_low, predt = 0)
-pt.f_moderate <- probtrans(msf.f_moderate, predt = 0)
+pt.f_low_moderate <- probtrans(msf.f_low_moderate, predt = 0)
+# pt.f_moderate <- probtrans(msf.f_moderate, predt = 0)
 pt.f_high <- probtrans(msf.f_high, predt = 0)
 # if just plotting a single level, replace the c() dataset with a single one_of()
 # or call plot() instead of vis.multiple.pt()
 
 vis.multiple.pt(
-  x = list(pt.f_low, pt.f_moderate, pt.f_high), 
+  x = list(pt.f_low_moderate, pt.f_high), 
   from = 1,
   to = 2, 
   conf.type = "none",
   # cols = c(1, 2, 3),
-  cols = c("blue", "red", "green"), #  something is wrong with this argument
-  labels = c("low", "moderate", "high"),
+  cols = c("blue", "green"), #  something is wrong with this argument
+  labels = c("Low-moderate", "High"),
   legend.title = "Pre-transplant ferritin",
   ylab = "Probability of graft failure",
   xlim = c(0, 5), 
@@ -794,11 +1118,11 @@ vis.multiple.pt(
     legend.text = element_text(size = axis_text_size)) 
 
 vis.multiple.pt(
-  x = list(pt.f_low, pt.f_moderate, pt.f_high), 
+  x = list(pt.f_low_moderate, pt.f_high), 
   from = 1,
   to = 3, 
-  cols = c("blue", "red", "green"), #  something is wrong with this argument
-  labels = c("low", "moderate", "high"),
+  cols = c("blue", "green"), #  something is wrong with this argument
+  labels = c("Low-moderate", "High"),
   legend.title = "Pre-transplant ferritin",
   conf.type = "none",
   ylab = "Probability of death without graft failure",
@@ -812,34 +1136,13 @@ vis.multiple.pt(
     axis.text.y = element_text(size = axis_text_size),   # Y-axis labels size
     legend.title = element_text(size = axis_text_size),    # Legend title size
     legend.text = element_text(size = axis_text_size))
-
-plot(msf.f_low, 
-    xlim = c(0, 5), 
-    col = c("black", "grey"), 
-    lty = c("dashed", "solid"), 
-    legend.pos = "top",
-    lwd = 2,
-    use.ggplot = TRUE,
-    type = "single", #for 2 boxes
-    scale_type = "fixed",
-    ylim = c(0, .1),
-    xlab = "Years post transplant",
-  ) + # Add title and center
-ggtitle("Cumulative baseline hazards for competing risk model for graft-failure") +
-theme(plot.title = element_text(size = plot_title_text_size),    # Title text size
-    axis.title.x = element_text(size = axis_text_size), # X-axis title size
-    axis.title.y = element_text(size = axis_text_size), # Y-axis title size
-    axis.text.x = element_text(size = axis_text_size),  # X-axis labels size
-    axis.text.y = element_text(size = axis_text_size),   # Y-axis labels size
-    legend.title = element_text(size = axis_text_size),    # Legend title size
-    legend.text = element_text(size = axis_text_size))
 ```
 
 ### subgroup analysis:
-#### aplastic anemia
-- We can't do the subgroup analysis for aplastic anemia unless we ignore busulfan covariate
+#### aplastic anemia  --- Graft failure
+- None of the aplastic anemia patients who received busulfan had graft failure. We can't do a subgroup analysis for aplastic anemia unless we ignore busulfan covariate. 
 ```{r pre_ferritin_gf_subgroup_aa}
-table1(~gender + age_at_ce + transplant_type_combined + ferritin_pre + has_busulfan + survival_5yr + scd_type| graft_fail_5yr, 
+table1(~gender + age_at_ce + transplant_type_combined + ferritin_pre + has_busulfan + survival_5yr + scd_type + site| graft_fail_5yr, 
         data = pre_ferritin_cox %>% 
               mutate(graft_fail_5yr = ifelse(graft_fail_5yr ==1, "Graft failure", "Graft failure free")) %>%
               mutate(survival_5yr = ifelse(survival_5yr == 1, "No", "Yes")) %>%
@@ -849,10 +1152,9 @@ table1(~gender + age_at_ce + transplant_type_combined + ferritin_pre + has_busul
 ```
 
 #### beta thalassemia major
-- We can't do the subgroup analysis unless we ignore busulfan covariate
 ```{r pre_ferritin_gf_subgroup_btm}
 
-table1(~gender + age_at_ce + transplant_type_combined + ferritin_pre + has_busulfan + survival_5yr + scd_type| graft_fail_5yr, 
+table1(~gender + age_at_ce + transplant_type_combined + ferritin_pre + has_busulfan + survival_5yr + scd_type + site| graft_fail_5yr, 
         data = pre_ferritin_cox %>% 
               mutate(graft_fail_5yr = ifelse(graft_fail_5yr ==1, "Graft failure", "Graft failure free")) %>%
               mutate(survival_5yr = ifelse(survival_5yr == 1, "No", "Yes")) %>%
@@ -878,9 +1180,9 @@ cox_sum(compRisk_ferritin_gf_btm) %>% prettify_kable()
 ```
 
 #### sickle cell disease
-- Because the sample sizes for some categories are very small. I did this analysis just for completion. We should intepret the results carefully. 
+- Due to the small sample size for patients in the high ferritin group, the results presented here are more for a completion purpose. We should intepret the results very carefully. 
 ```{r pre_ferritin_gf_subgroup_scd}
-table1(~gender + age_at_ce + transplant_type_combined + ferritin_pre + has_busulfan + survival_5yr + scd_type| graft_fail_5yr, 
+table1(~gender + age_at_ce + transplant_type_combined + ferritin_pre + has_busulfan + survival_5yr + scd_type + site| graft_fail_5yr, 
         data = pre_ferritin_cox %>% 
               mutate(graft_fail_5yr = ifelse(graft_fail_5yr ==1, "Graft failure", "Graft failure free")) %>%
               mutate(survival_5yr = ifelse(survival_5yr == 1, "No", "Yes")) %>%
@@ -906,7 +1208,7 @@ cox_sum(compRisk_ferritin_gf_scd) %>% prettify_kable()
 ```
 
 #### Diamond-Blackfan anemia
-- We can't do the subgroup analysis for this due to the small sample size
+- Since there is only 1 patient with graft failure for this subgroup, many categories have no observations. Please intepret the results very carefully. 
 ```{r pre_ferritin_gf_subgroup_dba}
 table1(~gender + age_at_ce + transplant_type_combined + ferritin_pre + has_busulfan + survival_5yr + scd_type| graft_fail_5yr, 
         data = pre_ferritin_cox %>% 
@@ -1085,7 +1387,7 @@ vis.multiple.pt(
   from = 1,
   to = 2, 
   conf.type = "none",
-  cols = c("red", "blue"), 
+  cols = c("blue", "green"), 
   labels = c("low", "high"),
   legend.title = "Pre-transplant LIC levels",
   ylab = "Probability of graft failure",
@@ -1105,7 +1407,7 @@ vis.multiple.pt(
   from = 1,
   to = 3, 
   conf.type = "none",
-  cols = c("red", "blue"), 
+  cols = c("blue", "green"), 
   labels = c("low", "high"),
   legend.title = "Pre-transplant LIC levels",
   ylab = "Probability of death without graft failure",
@@ -1144,7 +1446,6 @@ theme(plot.title = element_text(size = plot_title_text_size),    # Title text si
 
 ### subgroup analysis:
 #### aplastic anemia
-- We can't do the subgroup analysis for aplastic anemia due to the missing patients in some categories
 ```{r pre_LIC_gf_subgroup_aa}
 table1(~gender + age_at_ce + transplant_type_combined + LIC_level_1_binary + has_busulfan + survival_5yr + scd_type| graft_fail_5yr, 
         data = pre_LIC_cox %>% 
@@ -1153,17 +1454,32 @@ table1(~gender + age_at_ce + transplant_type_combined + LIC_level_1_binary + has
                   filter(scd_type == "aplastic anemia"), 
         overall = TRUE, 
         caption = "Graft failure at 5-yr following transplant")
+
+pre_LIC_df_aa <- pre_LIC_cox %>% 
+                          filter(scd_type == "aplastic anemia") %>%
+                          filter(transplant_type_combined != "Unknown") %>% 
+                          filter(!is.na(graft_fail_5yr)) %>% 
+                          mutate(graft_fail_5yr = recode(graft_fail_5yr, "0" = "event-free", "1" = "graft failure", "2" = "death")) %>%
+                          mutate(graft_fail_5yr = factor(graft_fail_5yr,
+                                                  levels = c("event-free", "graft failure", "death"))) %>% 
+                          filter(graft_fail_days_since_ce_5yr_censored >= 0) %>%
+                          mutate(transplant_type_combined = relevel(factor(transplant_type_combined), ref = "matched related"))
+
+compRisk_LIC_gf_aa <- coxph(Surv(graft_fail_days_since_ce_5yr_censored/30, graft_fail_5yr) ~ LIC_level_1_binary + age_at_ce + gender + has_busulfan  + transplant_type_combined, 
+                data = pre_LIC_df_aa, 
+                id = record_id)
+
+cox_sum(compRisk_LIC_gf_aa) %>% prettify_kable()
 ```
 
 #### beta thalassemia major
-- We can't do the subgroup analysis unless we ignore busulfan covariate
 ```{r pre_LIC_gf_subgroup_btm}
 table1(~gender + age_at_ce + transplant_type_combined + LIC_level_1_binary + has_busulfan + survival_5yr + scd_type| graft_fail_5yr, 
         data = pre_LIC_cox %>% 
                   mutate(graft_fail_5yr = ifelse(graft_fail_5yr ==1, "Graft failure", "Graft failure free")) %>%
                   mutate(survival_5yr = ifelse(survival_5yr == 1, "No", "Yes")) %>%
                   filter(scd_type == "beta thalassemia major"), 
-        overall = TRUE, 
+        overall = FALSE, 
         caption = "Graft failure at 5-yr following transplant")
 
 pre_LIC_df_btm <- pre_LIC_cox %>% 
@@ -1184,14 +1500,14 @@ cox_sum(compRisk_LIC_gf_btm) %>% prettify_kable()
 ```
 
 #### sickle cell disease
-- We can't do the subgroup analysis due to the missing patients in some categories. 
+- None of the patients with high LIC level before transplant in this subgroup experienced any graft failure.  
 ```{r pre_LIC_gf_subgroup_scd}
 table1(~gender + age_at_ce + transplant_type_combined + LIC_level_1_binary + has_busulfan + survival_5yr + scd_type| graft_fail_5yr, 
         data = pre_LIC_cox %>% 
                   mutate(graft_fail_5yr = ifelse(graft_fail_5yr ==1, "Graft failure", "Graft failure free")) %>%
                   mutate(survival_5yr = ifelse(survival_5yr == 1, "No", "Yes")) %>%
                   filter(scd_type == "sickle cell disease"), 
-        overall = TRUE, 
+        overall = FALSE, 
         caption = "Graft failure at 5-yr following transplant")
 ```
 
@@ -1203,22 +1519,21 @@ table1(~gender + age_at_ce + transplant_type_combined + LIC_level_1_binary + has
                   mutate(graft_fail_5yr = ifelse(graft_fail_5yr ==1, "Graft failure", "Graft failure free")) %>%
                   mutate(survival_5yr = ifelse(survival_5yr == 1, "No", "Yes")) %>%
               filter(scd_type == "Diamond-Blackfan anemia"), 
-        overall = TRUE, 
+        overall = FALSE, 
         caption = "Graft failure at 5-yr following transplant")
 
 ```
 
-
 # Bacteremia
-## Bacteremia stratified by <span style="color:red">pre-transplant ferritin levels</span>
+## Bacteremia stratified by <span style="color:red">pre-transplant ferritin levels</span> **1 year post-transplant**
 ### KM curves:
 ```{r bacteremia_pre_ferritin_km}
 pre_ferritin_bac <- pre_ferritin_cox %>% #filter(!(transplant_type_combined %in% c("autologous/genetherapy"))) %>%
                           # mutate(transplant_type_combined = relevel(transplant_type_combined, ref = "matched related"))
-                          mutate(bacteremia = ifelse(is.na(bacteremia), FALSE, bacteremia)) %>%
-                          mutate(ferritin_pre = factor(ferritin_pre, levels = c("low", "moderate", "high")))
+                          mutate(bacteremia = ifelse(is.na(bacteremia), FALSE, bacteremia)) #%>%
+                          # mutate(ferritin_pre = factor(ferritin_pre, levels = c("low", "moderate", "high")))
 
-table1(~ ferritin_pre + age_at_ce + gender + transplant_type_combined| bacteremia, 
+table1(~ ferritin_pre + age_at_ce + gender + transplant_type_combined + site| bacteremia, 
       data = pre_ferritin_bac %>% mutate(bacteremia = ifelse(!bacteremia, "No bacteremia", "Bacteremia")))
 
 table1(~ ferritin_pre | bacteremia + scd_type, 
@@ -1229,17 +1544,27 @@ km_ferritin_bac <- survfit(Surv(bacteremia_time_1yr_censored/365.25, bacteremia)
                     data = pre_ferritin_bac)
 
 ggsurvplot(km_ferritin_bac,
-          pval = TRUE, conf.int = FALSE,
-          risk.table = TRUE, # Add risk table
+          pval = TRUE, 
+          conf.int = TRUE, conf.int.alpha = 0.2, 
+          risk.table = FALSE, # Add risk table
           risk.table.col = "strata", # Change risk table color by groups
           linetype = "strata", # Change line type by groups
           surv.median.line = "hv", # Specify median survival
-          ggtheme = theme_bw(), # Change ggplot2 theme
+          # ggtheme = theme_bw(), # Change ggplot2 theme
           xlab = "Time (Years)",   # customize X axis label.
           ylab = "Overall Survival", 
-          title = "Kaplan-Meier curves for bacteremia probability using pre-transplant ferritin levels",
-          legend.labs = c("Low", "Moderate", "High"),    # change legend labels.
-          palette = c("red", "green", "blue"))
+          # title = "Kaplan-Meier curves for bacteremia probability using pre-transplant ferritin levels",
+          legend.labs = c("Low", "High"),    # change legend labels.
+          palette = c("green", "blue"), 
+          xlim = c(0, 1), ylim = c(0.5, 1.0),
+          ggtheme = theme_classic() + theme(plot.title = element_text(size = plot_title_text_size),    # Title text size
+                                  axis.title.x = element_text(size = axis_text_size), # X-axis title size
+                                  axis.title.y = element_text(size = axis_text_size), # Y-axis title size
+                                  axis.text.x = element_text(size = axis_text_size),  # X-axis labels size
+                                  axis.text.y = element_text(size = axis_text_size),   # Y-axis labels size
+                                  legend.title = element_text(size = axis_text_size),    # Legend title size
+                                  legend.text = element_text(size = axis_text_size)))
+
 ```
 
 ### Multivariate Cox regression analysis: 
@@ -1252,18 +1577,20 @@ ggsurvplot(km_ferritin_bac,
 ```{r beacteremia_pre_ferritin, echo= FALSE, message=FALSE, fig.width = 9, fig.height = 6}
 # 0 is censored/survived, 1 is death
 # exclude match_status and graft_manip
-ferritin_bac <- coxph(Surv(bacteremia_time_1yr_censored/365.25, bacteremia) ~ ferritin_pre + age_at_ce + gender + transplant_type_combined, 
-                data = pre_ferritin_bac)
+ferritin_bac <- coxph(Surv(bacteremia_time_1yr_censored/365.25, bacteremia) ~ ferritin_pre + age_at_ce + gender + transplant_type_combined + site, 
+                data = pre_ferritin_bac) #%>%
+                      # mutate(site = relevel(as.factor(site), ref = "chop")))
 
 # pre_ferritin_cox_1 %>% group_by(ferritin_pre, gender, transplant_type_combined, has_busulfan) %>%
 #                       summarise(n_distinct(record_id))
 # visualiza the impact on iron levels
 ferritin_levels_df <- with(pre_ferritin_bac,
-               data.frame(ferritin_pre = c("low", "moderate", "high"), 
-                          age_at_ce = rep(mean(age_at_ce, na.rm = TRUE), 3),
-                          gender = rep("Female", 3),
-                          transplant_type_combined = rep("matched related",3),
-                          has_busulfan = rep("No", 3)
+               data.frame(ferritin_pre = c("low-moderate", "high"), 
+                          age_at_ce = rep(mean(age_at_ce, na.rm = TRUE), 2),
+                          gender = rep("Female", 2),
+                          transplant_type_combined = rep("matched related",2),
+                          has_busulfan = rep("No", 2),
+                          site = rep("site_1", 2)
                           )
                )
 
@@ -1272,15 +1599,16 @@ axis_text_size <- 14
 
 fit <- survfit(ferritin_bac, newdata = ferritin_levels_df)
 ggsurvplot(fit, data = ferritin_levels_df, 
-                  conf.int = FALSE, 
-                  legend.labs = c("Low", "Moderate", "High"),
+                  conf.int = FALSE, conf.int.alpha = .1, 
+                  legend.labs = c("Low", "High"),
                   legend.title = "Pre-transplant ferritin levels", 
                   xlab = "Years", ylab = "Probability of bacteremia",
-                  xlim = c(0, 1), ylim = c(0, .5), 
-                  risk.table = TRUE,
+                  xlim = c(0, 1), ylim = c(0, 1), 
+                  risk.table = FALSE,
+                  censor = FALSE, 
                   fun = "event",
-                  palette = c("red", "green", "blue"), # custom color palette
-                  ggtheme = theme(
+                  palette = c("green", "blue"), # custom color palette
+                  ggtheme = theme_classic() + theme(
     plot.title = element_text(size = plot_title_text_size),    # Title text size
     axis.title.x = element_text(size = axis_text_size), # X-axis title size
     axis.title.y = element_text(size = axis_text_size), # Y-axis title size
@@ -1288,7 +1616,26 @@ ggsurvplot(fit, data = ferritin_levels_df,
     axis.text.y = element_text(size = axis_text_size),   # Y-axis labels size
     legend.title = element_text(size = axis_text_size),    # Legend title size
     legend.text = element_text(size = axis_text_size))) #, risk.table.title = "test")
+# p <- ggsurvplot(fit, data = ferritin_levels_df, 
+#                   conf.int = FALSE, conf.int.alpha = .1, 
+#                   legend.labs = c("Low", "High"),
+#                   legend.title = "Pre-transplant ferritin levels", 
+#                   xlab = "Years", ylab = "Probability of bacteremia",
+#                   xlim = c(0, 1), ylim = c(0, 1), 
+#                   risk.table = FALSE,
+#                   censor = FALSE, 
+#                   fun = "event",
+#                   palette = c("green", "blue"), # custom color palette
+#                   ggtheme = theme_classic() + theme(
+#     plot.title = element_text(size = plot_title_text_size),    # Title text size
+#     axis.title.x = element_text(size = axis_text_size), # X-axis title size
+#     axis.title.y = element_text(size = axis_text_size), # Y-axis title size
+#     axis.text.x = element_text(size = axis_text_size),  # X-axis labels size
+#     axis.text.y = element_text(size = axis_text_size),   # Y-axis labels size
+#     legend.title = element_text(size = axis_text_size),    # Legend title size
+#     legend.text = element_text(size = axis_text_size))) #, risk.table.title = "test")
 
+# ggsave("manuscript/figures/bacteremia_ferritin.png", p$plot, width = 7, height = 4, dpi = 600)
 ```
 
 ```{r bacteremia_pre_ferritin_sum, echo= FALSE, message=FALSE}
@@ -1297,7 +1644,7 @@ cox_sum(ferritin_bac) %>% prettify_kable()
 ```
 
 ### subgroup analysis
-
+- Site is not included as a covariate
 ```{r bacteremia_pre_ferritin_subgroup, echo= FALSE, message=FALSE, fig.width = 9, fig.height = 6}
 # table1(~ ferritin_pre + age_at_ce + gender + transplant_type_combined + scd_type| bacteremia, 
 #       data = pre_ferritin_bac %>% mutate(bacteremia = ifelse(is.na(bacteremia), "No bacteremia", "Bacteremia")) %>%
@@ -1326,11 +1673,11 @@ ferritin_bac_dba <- coxph(Surv(bacteremia_time_1yr_censored/365.25, bacteremia) 
 #                       summarise(n_distinct(record_id))
 # visualiza the impact on iron levels
 ferritin_pre_levels_df <- with(pre_ferritin_bac,
-               data.frame(ferritin_pre = c("low", "medium", "high"), 
-                          age_at_ce = rep(mean(age_at_ce, na.rm = TRUE), 3),
-                          gender = rep("Female", 3),
-                          transplant_type_combined = rep("matched related",3),
-                          has_busulfan = rep("No", 3)
+               data.frame(ferritin_pre = c("low-moderate", "high"), 
+                          age_at_ce = rep(mean(age_at_ce, na.rm = TRUE), 2),
+                          gender = rep("Female", 2),
+                          transplant_type_combined = rep("matched related",2),
+                          has_busulfan = rep("No", 2)
                           )
                )
 
@@ -1342,15 +1689,16 @@ fit_dba <- survfit(ferritin_bac_dba, newdata = ferritin_levels_df)
 p_aa <- ggsurvplot(fit_aa, data = ferritin_levels_df, 
                   conf.int = FALSE, 
                   # legend = "none",
-                  title = "Aplastic anemia", 
-                  legend.labs = c("Low", "medium", "High"),
+                  title = "SAA", 
+                  legend.labs = c("Low", "High"),
                   legend.title = "Pre-transplant ferritin levels", 
-                  xlab = "Years", ylab = "Probability of bacteremia",
-                  xlim = c(0, 1), ylim = c(0, .5), 
-                  risk.table = TRUE,
+                  xlab = "", ylab = "Probability of bacteremia",
+                  xlim = c(0, 1), ylim = c(0, 1), 
+                  risk.table = FALSE,
                   fun = "event",
-                  palette = c("red", "green", "blue"), # custom color palette
-                  ggtheme = theme(
+                  censor = FALSE, 
+                  palette = c("green", "blue"), # custom color palette
+                  ggtheme = theme_classic() + theme(
     plot.title = element_text(size = plot_title_text_size),    # Title text size
     axis.title.x = element_text(size = axis_text_size), # X-axis title size
     axis.title.y = element_text(size = axis_text_size), # Y-axis title size
@@ -1361,16 +1709,17 @@ p_aa <- ggsurvplot(fit_aa, data = ferritin_levels_df,
 
 p_scd <- ggsurvplot(fit_scd, data = ferritin_levels_df, 
                   conf.int = FALSE, 
-                  legend = "none",
-                  title = "Sickle cell anemia", 
-                  # legend.labs = c("Low", "High"),
-                  # legend.title = "Pre-transplant LIC levels", 
-                  xlab = "Years", ylab = "Probability of bacteremia",
-                  xlim = c(0, 1), ylim = c(0, .5), 
-                  risk.table = TRUE,
+                  # legend = "none",
+                  title = "SCD", #Sickle cell anemia
+                  legend.labs = c("Low", "High"),
+                  legend.title = "Pre-transplant ferritin levels",  
+                  xlab = "", ylab = "",
+                  xlim = c(0, 1), ylim = c(0, 1), 
+                  risk.table = FALSE,
+                  censor = FALSE, 
                   fun = "event",
-                  palette = c("red", "green", "blue"), # custom color palette
-                  ggtheme = theme(
+                  palette = c("green", "blue"), # custom color palette
+                  ggtheme = theme_classic() + theme(
     plot.title = element_text(size = plot_title_text_size),    # Title text size
     axis.title.x = element_text(size = axis_text_size), # X-axis title size
     axis.title.y = element_text(size = axis_text_size), # Y-axis title size
@@ -1383,14 +1732,15 @@ p_btm <- ggsurvplot(fit_btm, data = ferritin_levels_df,
                   conf.int = FALSE, 
                   legend = "none",
                   title = "beta thalassemia major", 
-                  # legend.labs = c("Low", "High"),
-                  # legend.title = "Pre-transplant LIC levels", 
+                  # legend.labs = c("Low-moderate", "High"),
+                  # legend.title = "Pre-transplant ferritin levels",  
                   xlab = "Years", ylab = "Probability of bacteremia",
-                  xlim = c(0, 1), ylim = c(0, .5), 
-                  risk.table = TRUE,
+                  xlim = c(0, 1), ylim = c(0, 1), 
+                  risk.table = FALSE,
+                  censor = FALSE, 
                   fun = "event",
-                  palette = c("red", "green", "blue"), # custom color palette
-                  ggtheme = theme(
+                  palette = c("green", "blue"), # custom color palette
+                  ggtheme = theme_classic() + theme(
     plot.title = element_text(size = plot_title_text_size),    # Title text size
     axis.title.x = element_text(size = axis_text_size), # X-axis title size
     axis.title.y = element_text(size = axis_text_size), # Y-axis title size
@@ -1403,12 +1753,13 @@ p_dba <- ggsurvplot(fit_dba, data = ferritin_levels_df,
                   conf.int = FALSE, 
                   title = "Diamond-Blackfan anemia", 
                   legend = "none", 
-                  xlab = "Years", ylab = "Probability of bacteremia",
-                  xlim = c(0, 1), ylim = c(0, .5), 
-                  risk.table = TRUE,
+                  xlab = "Years", ylab = "",
+                  xlim = c(0, 1), ylim = c(0, 1), 
+                  risk.table = FALSE,
                   fun = "event",
-                  palette = c("red", "green", "blue"), # custom color palette
-                  ggtheme = theme(
+                  censor = FALSE, 
+                  palette = c("green", "blue"), # custom color palette
+                  ggtheme = theme_classic() + theme(
     plot.title = element_text(size = plot_title_text_size),    # Title text size
     axis.title.x = element_text(size = axis_text_size), # X-axis title size
     axis.title.y = element_text(size = axis_text_size), # Y-axis title size
@@ -1417,6 +1768,8 @@ p_dba <- ggsurvplot(fit_dba, data = ferritin_levels_df,
     legend.position = "none")) #, risk.table.title = "test")
   
 grid.arrange(p_aa$plot, p_scd$plot, p_btm$plot, p_dba$plot, ncol = 2, nrow = 2)
+
+# ggsave("manuscript/figures/bacteremia_ferritin_subgroups.png", p, width = 14, height = 8, dpi = 600)
 ```
 
 #### aplastic anemia
@@ -1436,8 +1789,8 @@ ggsurvplot(km_LIC_bac,
           xlab = "Time (Years)",   # customize X axis label.
           ylab = "Overall Survival", 
           title = "Kaplan-Meier curves for bacteremia probability using pre-transplant ferritin levels --- aplastic anemia",
-          legend.labs = c("Low", "Moderate", "High"),    # change legend labels.
-          palette = c("red", "green", "blue"))
+          legend.labs = c("Low-moderate", "High"),    # change legend labels.
+          palette = c("green", "blue"))
 ```
 
 ##### Multivariate Cox regression analysis: 
@@ -1446,46 +1799,766 @@ cox_sum(ferritin_bac_aa) %>% prettify_kable()
 ```
 
 #### sickle cell disease
+##### KM curves
+```{r bacteremia_pre_ferritin_subgroup_scd_km}
+km_LIC_bac <- survfit(Surv(bacteremia_time_1yr_censored/365.25, bacteremia) ~ ferritin_pre,   
+                    data = pre_ferritin_bac %>% 
+                      filter(scd_type == "sickle cell disease", transplant_type_combined != "autologous/genetherapy"))
+
+ggsurvplot(km_LIC_bac,
+          pval = TRUE, conf.int = FALSE,
+          risk.table = TRUE, # Add risk table
+          risk.table.col = "strata", # Change risk table color by groups
+          linetype = "strata", # Change line type by groups
+          surv.median.line = "hv", # Specify median survival
+          ggtheme = theme_bw(), # Change ggplot2 theme
+          xlab = "Time (Years)",   # customize X axis label.
+          ylab = "Overall Survival", 
+          title = "Kaplan-Meier curves for bacteremia probability using pre-transplant ferritin levels --- sickle cell disease",
+          legend.labs = c("Low-moderate", "High"),    # change legend labels.
+          palette = c("green", "blue"))
+```
+
+##### Multivariate Cox regression analysis
 ```{r bacteremia_pre_ferritin_subgroup_scd}
 cox_sum(ferritin_bac_scd) %>% prettify_kable()
 ```
 
 #### beta thalassemia major
+##### KM curves
+```{r bacteremia_pre_ferritin_subgroup_btm_km}
+km_LIC_bac <- survfit(Surv(bacteremia_time_1yr_censored/365.25, bacteremia) ~ ferritin_pre,   
+                    data = pre_ferritin_bac %>% 
+                      filter(scd_type == "beta thalassemia major", transplant_type_combined != "autologous/genetherapy"))
+
+ggsurvplot(km_LIC_bac,
+          pval = TRUE, conf.int = FALSE,
+          risk.table = TRUE, # Add risk table
+          risk.table.col = "strata", # Change risk table color by groups
+          linetype = "strata", # Change line type by groups
+          surv.median.line = "hv", # Specify median survival
+          ggtheme = theme_bw(), # Change ggplot2 theme
+          xlab = "Time (Years)",   # customize X axis label.
+          ylab = "Overall Survival", 
+          title = "Kaplan-Meier curves for bacteremia probability using pre-transplant ferritin levels --- beta thalassemia major",
+          legend.labs = c("Low-moderate", "High"),    # change legend labels.
+          palette = c("green", "blue"))
+```
+
+##### Multivariate Cox regression analysis
 ```{r bacteremia_pre_ferritin_subgroup_btm}
 cox_sum(ferritin_bac_btm) %>% prettify_kable()
 ```
 
 #### Diamond-Blackfan anemia
-```{r bacteremia_pre_ferritin_subgroup_dba}
-cox_sum(ferritin_bac_dba) %>% prettify_kable()
+- For this subgroup, there is no patient with high ferritin level before transplant
+##### KM curves
+```{r bacteremia_pre_ferritin_subgroup_dba_km}
+km_LIC_bac <- survfit(Surv(bacteremia_time_1yr_censored/365.25, bacteremia) ~ ferritin_pre,   
+                    data = pre_ferritin_bac %>% 
+                      filter(scd_type == "Diamond-Blackfan anemia", transplant_type_combined != "autologous/genetherapy"))
+
+ggsurvplot(km_LIC_bac,
+          pval = TRUE, conf.int = FALSE,
+          risk.table = TRUE, # Add risk table
+          risk.table.col = "strata", # Change risk table color by groups
+          linetype = "strata", # Change line type by groups
+          surv.median.line = "hv", # Specify median survival
+          ggtheme = theme_bw(), # Change ggplot2 theme
+          xlab = "Time (Years)",   # customize X axis label.
+          ylab = "Overall Survival", 
+          title = "Kaplan-Meier curves for bacteremia probability using pre-transplant ferritin levels --- Diamond-Blackfan anemia",
+          legend.labs = c("Low-moderate"),    # change legend labels.
+          palette = c("green"))
 ```
 
+```{r bacteremia_pre_ferritin_subgroup_dba}
+# cox_sum(ferritin_bac_dba) %>% prettify_kable()
+```
 
-## Bacteremia stratified by <span style="color:red">pre-transplant LIC levels</span>
+## Bacteremia stratified by <span style="color:red">pre-transplant ferritin levels</span> **1 year post-transplant, EXCLUDING SITES 6&8**
+### KM curves:
+```{r bacteremia_pre_ferritin_km_2}
+pre_ferritin_bac_2 <- pre_ferritin_cox %>% 
+                          mutate(bacteremia = ifelse(is.na(bacteremia), FALSE, bacteremia)) %>%
+                          filter(!site %in% c("site_6", "site_8"))#%>%
+                          # mutate(ferritin_pre = factor(ferritin_pre, levels = c("low", "moderate", "high")))
+
+table1(~ ferritin_pre + age_at_ce + gender + transplant_type_combined + site| bacteremia, 
+      data = pre_ferritin_bac_2 %>% mutate(bacteremia = ifelse(!bacteremia, "No bacteremia", "Bacteremia")))
+
+table1(~ ferritin_pre | bacteremia + scd_type, 
+      data = pre_ferritin_bac_2 %>% mutate(bacteremia = ifelse(!bacteremia, "No bacteremia", "Bacteremia")),
+      overall = FALSE)
+
+km_ferritin_bac_2 <- survfit(Surv(bacteremia_time_1yr_censored/365.25, bacteremia) ~ ferritin_pre,   
+                    data = pre_ferritin_bac_2)
+
+ggsurvplot(km_ferritin_bac_2,
+          pval = TRUE, 
+          conf.int = TRUE, conf.int.alpha = 0.2, 
+          risk.table = FALSE, # Add risk table
+          risk.table.col = "strata", # Change risk table color by groups
+          linetype = "strata", # Change line type by groups
+          surv.median.line = "hv", # Specify median survival
+          # ggtheme = theme_bw(), # Change ggplot2 theme
+          xlab = "Time (Years)",   # customize X axis label.
+          ylab = "Overall Survival", 
+          # title = "Kaplan-Meier curves for bacteremia probability using pre-transplant ferritin levels",
+          legend.labs = c("Low", "High"),    # change legend labels.
+          palette = c("green", "blue"), 
+          xlim = c(0, 1), ylim = c(0.5, 1.0),
+          ggtheme = theme_classic() + theme(plot.title = element_text(size = plot_title_text_size),    # Title text size
+                                  axis.title.x = element_text(size = axis_text_size), # X-axis title size
+                                  axis.title.y = element_text(size = axis_text_size), # Y-axis title size
+                                  axis.text.x = element_text(size = axis_text_size),  # X-axis labels size
+                                  axis.text.y = element_text(size = axis_text_size),   # Y-axis labels size
+                                  legend.title = element_text(size = axis_text_size),    # Legend title size
+                                  legend.text = element_text(size = axis_text_size)))
+
+```
+
+### Multivariate Cox regression analysis: 
+- Cox proportional hazard model accounting for: 
+  - Bacterenia vs no-bacteremia (ref) within 1 yr following transplant
+  - Ferritin levels: low (ref), moderate, high
+  - Age, sex, transplant match
+- Subgroup analyses: disease type
+
+```{r beacteremia_pre_ferritin_2, echo= FALSE, message=FALSE, fig.width = 9, fig.height = 6}
+# 0 is censored/survived, 1 is death
+# exclude match_status and graft_manip
+ferritin_bac_2 <- coxph(Surv(bacteremia_time_1yr_censored/365.25, bacteremia) ~ ferritin_pre + age_at_ce + gender + transplant_type_combined + site, 
+                data = pre_ferritin_bac_2) #%>%
+                      # mutate(site = relevel(as.factor(site), ref = "chop")))
+
+# pre_ferritin_cox_1 %>% group_by(ferritin_pre, gender, transplant_type_combined, has_busulfan) %>%
+#                       summarise(n_distinct(record_id))
+# visualiza the impact on iron levels
+ferritin_levels_df_2 <- with(pre_ferritin_bac_2,
+               data.frame(ferritin_pre = c("low-moderate", "high"), 
+                          age_at_ce = rep(mean(age_at_ce, na.rm = TRUE), 2),
+                          gender = rep("Female", 2),
+                          transplant_type_combined = rep("matched related",2),
+                          has_busulfan = rep("No", 2),
+                          site = rep("site_1", 2)
+                          )
+               )
+
+plot_title_text_size <- 20
+axis_text_size <- 14
+
+fit_2 <- survfit(ferritin_bac_2, newdata = ferritin_levels_df_2)
+ggsurvplot(fit_2, data = ferritin_levels_df_2, 
+                  conf.int = FALSE, conf.int.alpha = .1, 
+                  legend.labs = c("Low", "High"),
+                  legend.title = "Pre-transplant ferritin levels", 
+                  xlab = "Years", ylab = "Probability of bacteremia",
+                  xlim = c(0, 1), ylim = c(0, 1), 
+                  risk.table = FALSE,
+                  censor = FALSE, 
+                  fun = "event",
+                  palette = c("green", "blue"), # custom color palette
+                  ggtheme = theme_classic() + theme(
+    plot.title = element_text(size = plot_title_text_size),    # Title text size
+    axis.title.x = element_text(size = axis_text_size), # X-axis title size
+    axis.title.y = element_text(size = axis_text_size), # Y-axis title size
+    axis.text.x = element_text(size = axis_text_size),  # X-axis labels size
+    axis.text.y = element_text(size = axis_text_size),   # Y-axis labels size
+    legend.title = element_text(size = axis_text_size),    # Legend title size
+    legend.text = element_text(size = axis_text_size))) #, risk.table.title = "test")
+
+```
+
+```{r bacteremia_pre_ferritin_sum_2, echo= FALSE, message=FALSE}
+# summary(res.cox)
+cox_sum(ferritin_bac_2) %>% prettify_kable()
+```
+
+### subgroup analysis
+- Site is not included as a covariate
+```{r bacteremia_pre_ferritin_subgroup_2, echo= FALSE, message=FALSE, fig.width = 9, fig.height = 6}
+# table1(~ ferritin_pre + age_at_ce + gender + transplant_type_combined + scd_type| bacteremia, 
+#       data = pre_ferritin_bac %>% mutate(bacteremia = ifelse(is.na(bacteremia), "No bacteremia", "Bacteremia")) %>%
+#               filter(scd_type  == "Diamond-Blackfan anemia"))
+
+# 0 is censored/survived, 1 is death
+# exclude match_status and graft_manip
+ferritin_bac_aa_2 <- coxph(Surv(bacteremia_time_1yr_censored/365.25, bacteremia) ~ ferritin_pre + age_at_ce + gender + transplant_type_combined, 
+                data = pre_ferritin_bac_2 %>% 
+                      filter(scd_type == "aplastic anemia", transplant_type_combined != "autologous/genetherapy"))
+
+ferritin_bac_scd_2 <- coxph(Surv(bacteremia_time_1yr_censored/365.25, bacteremia) ~ ferritin_pre + age_at_ce + gender + transplant_type_combined, 
+                data = pre_ferritin_bac_2 %>% 
+                      filter(scd_type == "sickle cell disease") %>%
+                      filter(transplant_type_combined != "Allogeneic: Cord Blood", , ignore.case = TRUE))
+
+ferritin_bac_btm_2 <- coxph(Surv(bacteremia_time_1yr_censored/365.25, bacteremia) ~ ferritin_pre + age_at_ce + gender + transplant_type_combined, 
+                data = pre_ferritin_bac_2 %>% 
+                      filter(scd_type == "beta thalassemia major"))
+
+ferritin_bac_dba_2 <- coxph(Surv(bacteremia_time_1yr_censored/365.25, bacteremia) ~ ferritin_pre + age_at_ce + gender + transplant_type_combined, 
+                data = pre_ferritin_bac_2 %>% 
+                      filter(scd_type == "Diamond-Blackfan anemia", !(transplant_type_combined %in% c("autologous/genetherapy", "Unknown"))))
+
+# pre_ferritin_cox_1 %>% group_by(ferritin_pre, gender, transplant_type_combined, has_busulfan) %>%
+#                       summarise(n_distinct(record_id))
+# visualiza the impact on iron levels
+ferritin_pre_levels_df_2 <- with(pre_ferritin_bac_2,
+               data.frame(ferritin_pre = c("low-moderate", "high"), 
+                          age_at_ce = rep(mean(age_at_ce, na.rm = TRUE), 2),
+                          gender = rep("Female", 2),
+                          transplant_type_combined = rep("matched related",2),
+                          has_busulfan = rep("No", 2)
+                          )
+               )
+
+fit_aa_2 <- survfit(ferritin_bac_aa_2, newdata = ferritin_levels_df_2)
+fit_scd_2 <- survfit(ferritin_bac_scd_2, newdata = ferritin_levels_df_2)
+fit_btm_2 <- survfit(ferritin_bac_btm_2, newdata = ferritin_levels_df_2)
+fit_dba_2 <- survfit(ferritin_bac_dba_2, newdata = ferritin_levels_df_2)
+
+p_aa_2 <- ggsurvplot(fit_aa_2, data = ferritin_levels_df_2, 
+                  conf.int = FALSE, 
+                  # legend = "none",
+                  title = "SAA", 
+                  legend.labs = c("Low", "High"),
+                  legend.title = "Pre-transplant ferritin levels", 
+                  xlab = "", ylab = "Probability of bacteremia",
+                  xlim = c(0, 1), ylim = c(0, 1), 
+                  risk.table = FALSE,
+                  fun = "event",
+                  censor = FALSE, 
+                  palette = c("green", "blue"), # custom color palette
+                  ggtheme = theme_classic() + theme(
+    plot.title = element_text(size = plot_title_text_size),    # Title text size
+    axis.title.x = element_text(size = axis_text_size), # X-axis title size
+    axis.title.y = element_text(size = axis_text_size), # Y-axis title size
+    axis.text.x = element_text(size = axis_text_size),  # X-axis labels size
+    axis.text.y = element_text(size = axis_text_size),   # Y-axis labels size
+    legend.title = element_text(size = axis_text_size),    # Legend title size
+    legend.text = element_text(size = axis_text_size))) #, risk.table.title = "test")
+
+p_scd_2 <- ggsurvplot(fit_scd_2, data = ferritin_levels_df_2, 
+                  conf.int = FALSE, 
+                  # legend = "none",
+                  title = "SCD", #Sickle cell anemia
+                  legend.labs = c("Low", "High"),
+                  legend.title = "Pre-transplant ferritin levels",  
+                  xlab = "", ylab = "",
+                  xlim = c(0, 1), ylim = c(0, 1), 
+                  risk.table = FALSE,
+                  censor = FALSE, 
+                  fun = "event",
+                  palette = c("green", "blue"), # custom color palette
+                  ggtheme = theme_classic() + theme(
+    plot.title = element_text(size = plot_title_text_size),    # Title text size
+    axis.title.x = element_text(size = axis_text_size), # X-axis title size
+    axis.title.y = element_text(size = axis_text_size), # Y-axis title size
+    axis.text.x = element_text(size = axis_text_size),  # X-axis labels size
+    axis.text.y = element_text(size = axis_text_size),   # Y-axis labels size
+    legend.title = element_text(size = axis_text_size),    # Legend title size
+    legend.text = element_text(size = axis_text_size))) #, risk.table.title = "test")
+
+p_btm_2 <- ggsurvplot(fit_btm_2, data = ferritin_levels_df_2, 
+                  conf.int = FALSE, 
+                  legend = "none",
+                  title = "beta thalassemia major", 
+                  # legend.labs = c("Low-moderate", "High"),
+                  # legend.title = "Pre-transplant ferritin levels",  
+                  xlab = "Years", ylab = "Probability of bacteremia",
+                  xlim = c(0, 1), ylim = c(0, 1), 
+                  risk.table = FALSE,
+                  censor = FALSE, 
+                  fun = "event",
+                  palette = c("green", "blue"), # custom color palette
+                  ggtheme = theme_classic() + theme(
+    plot.title = element_text(size = plot_title_text_size),    # Title text size
+    axis.title.x = element_text(size = axis_text_size), # X-axis title size
+    axis.title.y = element_text(size = axis_text_size), # Y-axis title size
+    axis.text.x = element_text(size = axis_text_size),  # X-axis labels size
+    axis.text.y = element_text(size = axis_text_size),   # Y-axis labels size
+    legend.title = element_text(size = axis_text_size),    # Legend title size
+    legend.text = element_text(size = axis_text_size))) #, risk.table.title = "test")
+
+p_dba_2 <- ggsurvplot(fit_dba_2, data = ferritin_levels_df_2, 
+                  conf.int = FALSE, 
+                  title = "Diamond-Blackfan anemia", 
+                  legend = "none", 
+                  xlab = "Years", ylab = "",
+                  xlim = c(0, 1), ylim = c(0, 1), 
+                  risk.table = FALSE,
+                  fun = "event",
+                  censor = FALSE, 
+                  palette = c("green", "blue"), # custom color palette
+                  ggtheme = theme_classic() + theme(
+    plot.title = element_text(size = plot_title_text_size),    # Title text size
+    axis.title.x = element_text(size = axis_text_size), # X-axis title size
+    axis.title.y = element_text(size = axis_text_size), # Y-axis title size
+    axis.text.x = element_text(size = axis_text_size),  # X-axis labels size
+    axis.text.y = element_text(size = axis_text_size),   # Y-axis labels size
+    legend.position = "none")) #, risk.table.title = "test")
+  
+grid.arrange(p_aa_2$plot, p_scd_2$plot, p_btm_2$plot, p_dba_2$plot, ncol = 2, nrow = 2)
+
+# ggsave("manuscript/figures/bacteremia_ferritin_subgroups.png", p, width = 14, height = 8, dpi = 600)
+```
+
+#### aplastic anemia
+##### KM curves
+```{r bacteremia_pre_ferritin_subgroup_aa_km_2}
+km_LIC_bac_2 <- survfit(Surv(bacteremia_time_1yr_censored/365.25, bacteremia) ~ ferritin_pre,   
+                    data = pre_ferritin_bac_2 %>% 
+                      filter(scd_type == "aplastic anemia", transplant_type_combined != "autologous/genetherapy"))
+
+ggsurvplot(km_LIC_bac_2,
+          pval = TRUE, conf.int = FALSE,
+          risk.table = TRUE, # Add risk table
+          risk.table.col = "strata", # Change risk table color by groups
+          linetype = "strata", # Change line type by groups
+          surv.median.line = "hv", # Specify median survival
+          ggtheme = theme_bw(), # Change ggplot2 theme
+          xlab = "Time (Years)",   # customize X axis label.
+          ylab = "Overall Survival", 
+          title = "Kaplan-Meier curves for bacteremia probability using pre-transplant ferritin levels --- aplastic anemia",
+          legend.labs = c("Low-moderate", "High"),    # change legend labels.
+          palette = c("green", "blue"))
+```
+
+##### Multivariate Cox regression analysis: 
+```{r bacteremia_pre_ferritin_subgroup_aa_2}
+cox_sum(ferritin_bac_aa_2) %>% prettify_kable()
+```
+
+#### sickle cell disease
+##### KM curves
+```{r bacteremia_pre_ferritin_subgroup_scd_km_2}
+km_LIC_bac_2 <- survfit(Surv(bacteremia_time_1yr_censored/365.25, bacteremia) ~ ferritin_pre,   
+                    data = pre_ferritin_bac_2 %>% 
+                      filter(scd_type == "sickle cell disease", transplant_type_combined != "autologous/genetherapy"))
+
+ggsurvplot(km_LIC_bac_2,
+          pval = TRUE, conf.int = FALSE,
+          risk.table = TRUE, # Add risk table
+          risk.table.col = "strata", # Change risk table color by groups
+          linetype = "strata", # Change line type by groups
+          surv.median.line = "hv", # Specify median survival
+          ggtheme = theme_bw(), # Change ggplot2 theme
+          xlab = "Time (Years)",   # customize X axis label.
+          ylab = "Overall Survival", 
+          title = "Kaplan-Meier curves for bacteremia probability using pre-transplant ferritin levels --- sickle cell disease",
+          legend.labs = c("Low-moderate", "High"),    # change legend labels.
+          palette = c("green", "blue"))
+```
+
+##### Multivariate Cox regression analysis
+```{r bacteremia_pre_ferritin_subgroup_scd_2}
+cox_sum(ferritin_bac_scd_2) %>% prettify_kable()
+```
+
+#### beta thalassemia major
+##### KM curves
+```{r bacteremia_pre_ferritin_subgroup_btm_km_2}
+km_LIC_bac_2 <- survfit(Surv(bacteremia_time_1yr_censored/365.25, bacteremia) ~ ferritin_pre,   
+                    data = pre_ferritin_bac_2 %>% 
+                      filter(scd_type == "beta thalassemia major", transplant_type_combined != "autologous/genetherapy"))
+
+ggsurvplot(km_LIC_bac_2,
+          pval = TRUE, conf.int = FALSE,
+          risk.table = TRUE, # Add risk table
+          risk.table.col = "strata", # Change risk table color by groups
+          linetype = "strata", # Change line type by groups
+          surv.median.line = "hv", # Specify median survival
+          ggtheme = theme_bw(), # Change ggplot2 theme
+          xlab = "Time (Years)",   # customize X axis label.
+          ylab = "Overall Survival", 
+          title = "Kaplan-Meier curves for bacteremia probability using pre-transplant ferritin levels --- beta thalassemia major",
+          legend.labs = c("Low-moderate", "High"),    # change legend labels.
+          palette = c("green", "blue"))
+```
+
+##### Multivariate Cox regression analysis
+```{r bacteremia_pre_ferritin_subgroup_btm_2}
+cox_sum(ferritin_bac_btm_2) %>% prettify_kable()
+```
+
+#### Diamond-Blackfan anemia
+- For this subgroup, there is no patient with high ferritin level before transplant
+##### KM curves
+```{r bacteremia_pre_ferritin_subgroup_dba_km_2}
+km_LIC_bac_2 <- survfit(Surv(bacteremia_time_1yr_censored/365.25, bacteremia) ~ ferritin_pre,   
+                    data = pre_ferritin_bac_2 %>% 
+                      filter(scd_type == "Diamond-Blackfan anemia", transplant_type_combined != "autologous/genetherapy"))
+
+ggsurvplot(km_LIC_bac_2,
+          pval = TRUE, conf.int = FALSE,
+          risk.table = TRUE, # Add risk table
+          risk.table.col = "strata", # Change risk table color by groups
+          linetype = "strata", # Change line type by groups
+          surv.median.line = "hv", # Specify median survival
+          ggtheme = theme_bw(), # Change ggplot2 theme
+          xlab = "Time (Years)",   # customize X axis label.
+          ylab = "Overall Survival", 
+          title = "Kaplan-Meier curves for bacteremia probability using pre-transplant ferritin levels --- Diamond-Blackfan anemia",
+          legend.labs = c("Low-moderate"),    # change legend labels.
+          palette = c("green"))
+```
+
+## Bacteremia stratified by <span style="color:red">pre-transplant ferritin levels</span> **6 months post-transplant**
+### KM curves:
+```{r bacteremia_pre_ferritin_km_6mon}
+pre_ferritin_bac_6mon <- pre_ferritin_cox %>% #filter(!(transplant_type_combined %in% c("autologous/genetherapy"))) %>%
+                          # mutate(transplant_type_combined = relevel(transplant_type_combined, ref = "matched related"))
+                          mutate(bacteremia_6mon = ifelse(is.na(bacteremia_6mon), FALSE, bacteremia_6mon)) #%>%
+                          # mutate(ferritin_pre = factor(ferritin_pre, levels = c("low", "moderate", "high")))
+
+km_ferritin_bac_6mon <- survfit(Surv(bacteremia_time_1yr_censored/30, bacteremia_6mon) ~ ferritin_pre,   
+                    data = pre_ferritin_bac)
+
+ggsurvplot(km_ferritin_bac_6mon,
+          pval = TRUE, 
+          conf.int = TRUE, conf.int.alpha = 0.2, 
+          risk.table = FALSE, # Add risk table
+          risk.table.col = "strata", # Change risk table color by groups
+          linetype = "strata", # Change line type by groups
+          surv.median.line = "hv", # Specify median survival
+          # ggtheme = theme_bw(), # Change ggplot2 theme
+          xlab = "Time (Months)",   # customize X axis label.
+          ylab = "Overall Survival", 
+          # title = "Kaplan-Meier curves for bacteremia probability using pre-transplant ferritin levels",
+          legend.labs = c("Low", "High"),    # change legend labels.
+          palette = c("green", "blue"), 
+          xlim = c(0, 6), ylim = c(0.5, 1.0),
+          ggtheme = theme_classic() + theme(plot.title = element_text(size = plot_title_text_size),    # Title text size
+                                  axis.title.x = element_text(size = axis_text_size), # X-axis title size
+                                  axis.title.y = element_text(size = axis_text_size), # Y-axis title size
+                                  axis.text.x = element_text(size = axis_text_size),  # X-axis labels size
+                                  axis.text.y = element_text(size = axis_text_size),   # Y-axis labels size
+                                  legend.title = element_text(size = axis_text_size),    # Legend title size
+                                  legend.text = element_text(size = axis_text_size)))
+
+```
+
+### Multivariate Cox regression analysis: 
+- Cox proportional hazard model accounting for: 
+  - Bacterenia vs no-bacteremia (ref) within 1 yr following transplant
+  - Ferritin levels: low (ref), moderate, high
+  - Age, sex, transplant match
+- Subgroup analyses: disease type
+
+```{r beacteremia_pre_ferritin_6mon, echo= FALSE, message=FALSE, fig.width = 9, fig.height = 6}
+# 0 is censored/survived, 1 is death
+# exclude match_status and graft_manip
+ferritin_bac_6mon <- coxph(Surv(bacteremia_time_6mon_censored/30, bacteremia_6mon) ~ ferritin_pre + age_at_ce + gender + transplant_type_combined + site, 
+                data = pre_ferritin_bac) #%>%
+                      # mutate(site = relevel(as.factor(site), ref = "chop")))
+
+# pre_ferritin_cox_1 %>% group_by(ferritin_pre, gender, transplant_type_combined, has_busulfan) %>%
+#                       summarise(n_distinct(record_id))
+# visualiza the impact on iron levels
+ferritin_levels_df_6mon <- with(pre_ferritin_bac_6mon,
+               data.frame(ferritin_pre = c("low-moderate", "high"), 
+                          age_at_ce = rep(mean(age_at_ce, na.rm = TRUE), 2),
+                          gender = rep("Female", 2),
+                          transplant_type_combined = rep("matched related",2),
+                          has_busulfan = rep("No", 2),
+                          site = rep("site_1", 2)
+                          )
+               )
+
+plot_title_text_size <- 20
+axis_text_size <- 14
+
+fit_6mon <- survfit(ferritin_bac_6mon, newdata = ferritin_levels_df_6mon)
+ggsurvplot(fit_6mon, data = ferritin_levels_df_6mon, 
+                  conf.int = FALSE, conf.int.alpha = .1, 
+                  legend.labs = c("Low", "High"),
+                  legend.title = "Pre-transplant ferritin levels", 
+                  xlab = "Months", ylab = "Probability of bacteremia",
+                  xlim = c(0, 6), ylim = c(0, 1), 
+                  risk.table = FALSE,
+                  censor = FALSE, 
+                  fun = "event",
+                  palette = c("green", "blue"), # custom color palette
+                  ggtheme = theme_classic() + theme(
+    plot.title = element_text(size = plot_title_text_size),    # Title text size
+    axis.title.x = element_text(size = axis_text_size), # X-axis title size
+    axis.title.y = element_text(size = axis_text_size), # Y-axis title size
+    axis.text.x = element_text(size = axis_text_size),  # X-axis labels size
+    axis.text.y = element_text(size = axis_text_size),   # Y-axis labels size
+    legend.title = element_text(size = axis_text_size),    # Legend title size
+    legend.text = element_text(size = axis_text_size))) #, risk.table.title = "test")
+
+```
+
+```{r bacteremia_pre_ferritin_sum_6mon, echo= FALSE, message=FALSE}
+# summary(res.cox)
+cox_sum(ferritin_bac_6mon) %>% prettify_kable()
+```
+
+### subgroup analysis
+- Site is not included as a covariate
+```{r bacteremia_pre_ferritin_subgroup_6mon, echo= FALSE, message=FALSE, fig.width = 9, fig.height = 6}
+# table1(~ ferritin_pre + age_at_ce + gender + transplant_type_combined + scd_type| bacteremia, 
+#       data = pre_ferritin_bac %>% mutate(bacteremia = ifelse(is.na(bacteremia), "No bacteremia", "Bacteremia")) %>%
+#               filter(scd_type  == "Diamond-Blackfan anemia"))
+
+# 0 is censored/survived, 1 is death
+# exclude match_status and graft_manip
+ferritin_bac_aa_6mon <- coxph(Surv(bacteremia_time_6mon_censored/30, bacteremia_6mon) ~ ferritin_pre + age_at_ce + gender + transplant_type_combined, 
+                data = pre_ferritin_bac %>% 
+                      filter(scd_type == "aplastic anemia", transplant_type_combined != "autologous/genetherapy"))
+
+ferritin_bac_scd_6mon <- coxph(Surv(bacteremia_time_6mon_censored/30, bacteremia_6mon) ~ ferritin_pre + age_at_ce + gender + transplant_type_combined, 
+                data = pre_ferritin_bac %>% 
+                      filter(scd_type == "sickle cell disease") %>%
+                      filter(transplant_type_combined != "Allogeneic: Cord Blood", , ignore.case = TRUE))
+
+ferritin_bac_btm_6mon <- coxph(Surv(bacteremia_time_6mon_censored/30, bacteremia_6mon) ~ ferritin_pre + age_at_ce + gender + transplant_type_combined, 
+                data = pre_ferritin_bac %>% 
+                      filter(scd_type == "beta thalassemia major"))
+
+ferritin_bac_dba_6mon <- coxph(Surv(bacteremia_time_6mon_censored/30, bacteremia_6mon) ~ ferritin_pre + age_at_ce + gender + transplant_type_combined, 
+                data = pre_ferritin_bac %>% 
+                      filter(scd_type == "Diamond-Blackfan anemia", !(transplant_type_combined %in% c("autologous/genetherapy", "Unknown"))))
+
+# pre_ferritin_cox_1 %>% group_by(ferritin_pre, gender, transplant_type_combined, has_busulfan) %>%
+#                       summarise(n_distinct(record_id))
+# visualiza the impact on iron levels
+ferritin_pre_levels_df_6mon <- with(pre_ferritin_bac_6mon,
+               data.frame(ferritin_pre = c("low-moderate", "high"), 
+                          age_at_ce = rep(mean(age_at_ce, na.rm = TRUE), 2),
+                          gender = rep("Female", 2),
+                          transplant_type_combined = rep("matched related",2),
+                          has_busulfan = rep("No", 2)
+                          )
+               )
+
+fit_aa_6mon <- survfit(ferritin_bac_aa_6mon, newdata = ferritin_levels_df_6mon)
+fit_scd_6mon<- survfit(ferritin_bac_scd_6mon, newdata = ferritin_levels_df_6mon)
+fit_btm_6mon <- survfit(ferritin_bac_btm_6mon, newdata = ferritin_levels_df_6mon)
+fit_dba_6mon <- survfit(ferritin_bac_dba_6mon, newdata = ferritin_levels_df_6mon)
+
+p_aa_6mon <- ggsurvplot(fit_aa_6mon, data = ferritin_levels_df_6mon, 
+                  conf.int = FALSE, 
+                  # legend = "none",
+                  title = "SAA", 
+                  legend.labs = c("Low", "High"),
+                  legend.title = "Pre-transplant ferritin levels", 
+                  xlab = "Time (Months)", ylab = "Probability of bacteremia",
+                  xlim = c(0, 6), ylim = c(0, 1), 
+                  risk.table = FALSE,
+                  fun = "event",
+                  censor = FALSE, 
+                  palette = c("green", "blue"), # custom color palette
+                  ggtheme = theme_classic() + theme(
+    plot.title = element_text(size = plot_title_text_size),    # Title text size
+    axis.title.x = element_text(size = axis_text_size), # X-axis title size
+    axis.title.y = element_text(size = axis_text_size), # Y-axis title size
+    axis.text.x = element_text(size = axis_text_size),  # X-axis labels size
+    axis.text.y = element_text(size = axis_text_size),   # Y-axis labels size
+    legend.title = element_text(size = axis_text_size),    # Legend title size
+    legend.text = element_text(size = axis_text_size))) #, risk.table.title = "test")
+
+p_scd_6mon <- ggsurvplot(fit_scd_6mon, data = ferritin_levels_df_6mon, 
+                  conf.int = FALSE, 
+                  # legend = "none",
+                  title = "SCD", #Sickle cell anemia
+                  legend.labs = c("Low", "High"),
+                  legend.title = "Pre-transplant ferritin levels",  
+                  xlab = "Time (Months)", ylab = "",
+                  xlim = c(0, 6), ylim = c(0, 1), 
+                  risk.table = FALSE,
+                  censor = FALSE, 
+                  fun = "event",
+                  palette = c("green", "blue"), # custom color palette
+                  ggtheme = theme_classic() + theme(
+    plot.title = element_text(size = plot_title_text_size),    # Title text size
+    axis.title.x = element_text(size = axis_text_size), # X-axis title size
+    axis.title.y = element_text(size = axis_text_size), # Y-axis title size
+    axis.text.x = element_text(size = axis_text_size),  # X-axis labels size
+    axis.text.y = element_text(size = axis_text_size),   # Y-axis labels size
+    legend.title = element_text(size = axis_text_size),    # Legend title size
+    legend.text = element_text(size = axis_text_size))) #, risk.table.title = "test")
+
+p_btm_6mon <- ggsurvplot(fit_btm_6mon, data = ferritin_levels_df_6mon, 
+                  conf.int = FALSE, 
+                  legend = "none",
+                  title = "beta thalassemia major", 
+                  # legend.labs = c("Low-moderate", "High"),
+                  # legend.title = "Pre-transplant ferritin levels",  
+                  xlab = "Time (Months)", ylab = "Probability of bacteremia",
+                  xlim = c(0, 6), ylim = c(0, 1), 
+                  risk.table = FALSE,
+                  censor = FALSE, 
+                  fun = "event",
+                  palette = c("green", "blue"), # custom color palette
+                  ggtheme = theme_classic() + theme(
+    plot.title = element_text(size = plot_title_text_size),    # Title text size
+    axis.title.x = element_text(size = axis_text_size), # X-axis title size
+    axis.title.y = element_text(size = axis_text_size), # Y-axis title size
+    axis.text.x = element_text(size = axis_text_size),  # X-axis labels size
+    axis.text.y = element_text(size = axis_text_size),   # Y-axis labels size
+    legend.title = element_text(size = axis_text_size),    # Legend title size
+    legend.text = element_text(size = axis_text_size))) #, risk.table.title = "test")
+
+p_dba_6mon <- ggsurvplot(fit_dba_6mon, data = ferritin_levels_df_6mon, 
+                  conf.int = FALSE, 
+                  title = "Diamond-Blackfan anemia", 
+                  legend = "none", 
+                  xlab = "Months", ylab = "",
+                  xlim = c(0, 6), ylim = c(0, 1), 
+                  risk.table = FALSE,
+                  fun = "event",
+                  censor = FALSE, 
+                  palette = c("green", "blue"), # custom color palette
+                  ggtheme = theme_classic() + theme(
+    plot.title = element_text(size = plot_title_text_size),    # Title text size
+    axis.title.x = element_text(size = axis_text_size), # X-axis title size
+    axis.title.y = element_text(size = axis_text_size), # Y-axis title size
+    axis.text.x = element_text(size = axis_text_size),  # X-axis labels size
+    axis.text.y = element_text(size = axis_text_size),   # Y-axis labels size
+    legend.position = "none")) #, risk.table.title = "test")
+  
+grid.arrange(p_aa_6mon$plot, p_scd_6mon$plot, p_btm_6mon$plot, p_dba_6mon$plot, ncol = 2, nrow = 2)
+
+# ggsave("manuscript/figures/bacteremia_ferritin_subgroups.png", p, width = 14, height = 8, dpi = 600)
+```
+
+#### aplastic anemia
+##### KM curves
+```{r bacteremia_pre_ferritin_subgroup_aa_km_6mon}
+km_LIC_bac_6mon <- survfit(Surv(bacteremia_time_6mon_censored/30, bacteremia_6mon) ~ ferritin_pre,   
+                    data = pre_ferritin_bac %>% 
+                      filter(scd_type == "aplastic anemia", transplant_type_combined != "autologous/genetherapy"))
+
+ggsurvplot(km_LIC_bac_6mon,
+          pval = TRUE, conf.int = FALSE,
+          risk.table = TRUE, # Add risk table
+          risk.table.col = "strata", # Change risk table color by groups
+          linetype = "strata", # Change line type by groups
+          surv.median.line = "hv", # Specify median survival
+          ggtheme = theme_bw(), # Change ggplot2 theme
+          xlab = "Time (Months)",   # customize X axis label.
+          xlim = c(0, 6), 
+          ylab = "Overall Survival", 
+          title = "Kaplan-Meier curves for bacteremia probability using pre-transplant ferritin levels --- aplastic anemia",
+          legend.labs = c("Low-moderate", "High"),    # change legend labels.
+          palette = c("green", "blue"))
+```
+
+##### Multivariate Cox regression analysis: 
+```{r bacteremia_pre_ferritin_subgroup_aa_6mon}
+cox_sum(ferritin_bac_aa_6mon) %>% prettify_kable()
+```
+
+#### sickle cell disease
+##### KM curves
+```{r bacteremia_pre_ferritin_subgroup_scd_km_6mon}
+km_LIC_bac_6mon <- survfit(Surv(bacteremia_time_6mon_censored/30, bacteremia_6mon) ~ ferritin_pre,   
+                    data = pre_ferritin_bac %>% 
+                      filter(scd_type == "sickle cell disease", transplant_type_combined != "autologous/genetherapy"))
+
+ggsurvplot(km_LIC_bac_6mon,
+          pval = TRUE, conf.int = FALSE,
+          risk.table = TRUE, # Add risk table
+          risk.table.col = "strata", # Change risk table color by groups
+          linetype = "strata", # Change line type by groups
+          surv.median.line = "hv", # Specify median survival
+          ggtheme = theme_bw(), # Change ggplot2 theme
+          xlab = "Time (Months)",   # customize X axis label.
+          ylab = "Overall Survival", 
+          xlim = c(0, 6), 
+          title = "Kaplan-Meier curves for bacteremia probability using pre-transplant ferritin levels --- sickle cell disease",
+          legend.labs = c("Low-moderate", "High"),    # change legend labels.
+          palette = c("green", "blue"))
+```
+
+##### Multivariate Cox regression analysis
+```{r bacteremia_pre_ferritin_subgroup_scd_6mon}
+cox_sum(ferritin_bac_scd) %>% prettify_kable()
+```
+
+#### beta thalassemia major
+##### KM curves
+```{r bacteremia_pre_ferritin_subgroup_btm_km_6mon}
+km_LIC_bac_6mon <- survfit(Surv(bacteremia_time_6mon_censored/30, bacteremia_6mon) ~ ferritin_pre,   
+                    data = pre_ferritin_bac %>% 
+                      filter(scd_type == "beta thalassemia major", transplant_type_combined != "autologous/genetherapy"))
+
+ggsurvplot(km_LIC_bac_6mon,
+          pval = TRUE, conf.int = FALSE,
+          risk.table = TRUE, # Add risk table
+          risk.table.col = "strata", # Change risk table color by groups
+          linetype = "strata", # Change line type by groups
+          surv.median.line = "hv", # Specify median survival
+          ggtheme = theme_bw(), # Change ggplot2 theme
+          xlab = "Time (Months)",   # customize X axis label.
+          xlim = c(0, 6), 
+          ylab = "Overall Survival", 
+          title = "Kaplan-Meier curves for bacteremia probability using pre-transplant ferritin levels --- beta thalassemia major",
+          legend.labs = c("Low-moderate", "High"),    # change legend labels.
+          palette = c("green", "blue"))
+```
+
+##### Multivariate Cox regression analysis
+```{r bacteremia_pre_ferritin_subgroup_btm_6mon}
+cox_sum(ferritin_bac_btm_6mon) %>% prettify_kable()
+```
+
+#### Diamond-Blackfan anemia
+- For this subgroup, there is no patient with high ferritin level before transplant
+##### KM curves
+```{r bacteremia_pre_ferritin_subgroup_dba_km_6mon}
+km_LIC_bac_6mon <- survfit(Surv(bacteremia_time_6mon_censored/30, bacteremia_6mon) ~ ferritin_pre,   
+                    data = pre_ferritin_bac %>% 
+                      filter(scd_type == "Diamond-Blackfan anemia", transplant_type_combined != "autologous/genetherapy"))
+
+ggsurvplot(km_LIC_bac_6mon,
+          pval = TRUE, conf.int = FALSE,
+          risk.table = TRUE, # Add risk table
+          risk.table.col = "strata", # Change risk table color by groups
+          linetype = "strata", # Change line type by groups
+          surv.median.line = "hv", # Specify median survival
+          ggtheme = theme_bw(), # Change ggplot2 theme
+          xlab = "Time (Months)",   # customize X axis label.
+          xlim = c(0, 6), 
+          ylab = "Overall Survival", 
+          title = "Kaplan-Meier curves for bacteremia probability using pre-transplant ferritin levels --- Diamond-Blackfan anemia",
+          legend.labs = c("Low-moderate"),    # change legend labels.
+          palette = c("green"))
+```
+
+```{r bacteremia_pre_ferritin_subgroup_dba_6mon}
+# cox_sum(ferritin_bac_dba_6mon) %>% prettify_kable()
+```
+
+## Bacteremia stratified by <span style="color:red">pre-transplant LIC levels</span> LIC cut-off = 5 mg Fe/g dry wt - 1 year post transplant
 ### KM curves:
 ```{r bacteremia_pre_LIC_km}
 pre_LIC_bac <- pre_LIC_cox %>% 
                           #filter(!(transplant_type_combined %in% c("autologous/genetherapy"))) %>%
-                          # mutate(transplant_type_combined = relevel(transplant_type_combined, ref = "matched related"))
-                          mutate(bacteremia = ifelse(is.na(bacteremia), FALSE, bacteremia))
+                          mutate(bacteremia_1yr = ifelse(is.na(bacteremia_1yr), FALSE, bacteremia_1yr)) %>%
+                          mutate(LIC_level_1_binary_8 = LIC_level_1_binary) %>% # using a cut-off of 8
+                          mutate(LIC_level_1_binary = if_else(LIC <5, "low", "high")) %>% # using a cut-off of 5
+                          mutate(LIC_level_1_binary = relevel(as.factor(LIC_level_1_binary), ref = "low"))
 
-table1(~ LIC_level_1_binary + age_at_ce + gender + transplant_type_combined| bacteremia, 
-      data = pre_LIC_bac %>% mutate(bacteremia = ifelse(!bacteremia, "No bacteremia", "Bacteremia")),
-      caption = "Bacteremia 5-yr post transplant for LIC cut-off = 8 mg Fe/g dry wt-- entire cohort")
+table1(~ LIC_level_1_binary + age_at_ce + gender + transplant_type_combined + site| bacteremia_1yr, 
+      data = pre_LIC_bac %>% mutate(bacteremia_1yr = ifelse(!bacteremia_1yr, "No bacteremia", "Bacteremia")),
+      caption = "Bacteremia 1-yr post transplant for LIC cut-off = 5 mg Fe/g dry wt-- entire cohort")
 
-table1(~ LIC_level_1_binary | bacteremia + scd_type,
-      data = pre_LIC_bac %>% mutate(bacteremia = ifelse(!bacteremia, "No bacteremia", "Bacteremia")),
+table1(~ LIC_level_1_binary_8 | bacteremia_1yr + scd_type,
+      data = pre_LIC_bac %>% mutate(bacteremia_1yr = ifelse(!bacteremia_1yr, "No bacteremia", "Bacteremia")),
       overall = FALSE,
-      caption = "Bacteremia 5-yr post transplant for LIC cut-off = 8 mg Fe/g dry wt")
+      caption = "Bacteremia 1-yr post transplant for LIC cut-off = 8 mg Fe/g dry wt")
 
-table1(~ LIC_level_1_binary | bacteremia + scd_type, 
+table1(~ LIC_level_1_binary | bacteremia_1yr + scd_type, 
       data = pre_LIC_bac %>% 
-            mutate(bacteremia = ifelse(!bacteremia, "No bacteremia", "Bacteremia")) %>%
-            mutate(LIC_level_1_binary = if_else(LIC <5, "low", "high")),
+            mutate(bacteremia_1yr = ifelse(!bacteremia_1yr, "No bacteremia", "Bacteremia")),
       overall = FALSE,
       caption = "Bacteremia 5-yr post transplant for LIC cut-off = 5 mg Fe/g dry wt")
 
-km_LIC_bac <- survfit(Surv(bacteremia_time_1yr_censored/365.25, bacteremia) ~ LIC_level_1_binary,   
+km_LIC_bac <- survfit(Surv(bacteremia_time_1yr_censored/365.25, bacteremia_1yr) ~ LIC_level_1_binary,   
                     data = pre_LIC_bac)
 
 ggsurvplot(km_LIC_bac,
@@ -1499,13 +2572,13 @@ ggsurvplot(km_LIC_bac,
           ylab = "Overall Survival", 
           title = "Kaplan-Meier curves for bacteremia probability using pre-transplant LIC levels",
           legend.labs = c("Low", "High"),    # change legend labels.
-          palette = c("red", "blue"))
+          palette = c("green", "blue"))
 ```
 
 ### Multivariate Cox regression analysis: 
 - Cox proportional hazard model accounting for: 
   - Bacteremia vs no-bacteremia (ref) within 1 yr following transplant
-  - LIC levels: high vs. low (ref), using the most recent LIC values with binary cut-off of 8 
+  - LIC levels: high vs. low (ref), **using the most recent LIC values with binary cut-off of 5**
   - Age, sex, transplant match
 - Subgroup analyses: disease type
 
@@ -1515,8 +2588,10 @@ ggsurvplot(km_LIC_bac,
 
 # 0 is censored/survived, 1 is death
 # exclude match_status and graft_manip
-LIC_bac <- coxph(Surv(bacteremia_time_1yr_censored/365.25, bacteremia) ~ LIC_level_1_binary+ age_at_ce + gender + transplant_type_combined, 
-                data = pre_LIC_bac %>% mutate(no_bacteremia = ifelse(bacteremia, FALSE, TRUE)))
+LIC_bac <- coxph(Surv(bacteremia_time_1yr_censored/365.25, bacteremia_1yr) ~ LIC_level_1_binary+ age_at_ce + gender + transplant_type_combined + site, 
+                data = pre_LIC_bac %>% 
+                    mutate(no_bacteremia_1yr = ifelse(bacteremia_1yr, FALSE, TRUE))) #%>%
+                    # mutate(site = relevel(as.factor(site), ref = "chop")))
 
 # pre_ferritin_cox_1 %>% group_by(ferritin_pre, gender, transplant_type_combined, has_busulfan) %>%
 #                       summarise(n_distinct(record_id))
@@ -1526,7 +2601,8 @@ LIC_levels_df <- with(pre_LIC_bac,
                           age_at_ce = rep(mean(age_at_ce, na.rm = TRUE), 2),
                           gender = rep("Female", 2),
                           transplant_type_combined = rep("matched related",2),
-                          has_busulfan = rep("No", 2)
+                          has_busulfan = rep("No", 2),
+                          site = c("site_1", "site_1")
                           )
                )
 
@@ -1539,7 +2615,7 @@ ggsurvplot(fit, data = LIC_levels_df,
                   xlim = c(0, 1), ylim = c(0, .5), 
                   risk.table = TRUE,
                   fun = "event",
-                  palette = c("red", "blue"), # custom color palette
+                  palette = c("green", "blue"), # custom color palette
                   ggtheme = theme(
     plot.title = element_text(size = plot_title_text_size),    # Title text size
     axis.title.x = element_text(size = axis_text_size), # X-axis title size
@@ -1557,7 +2633,7 @@ cox_sum(LIC_bac) %>% prettify_kable()
 ```
 
 ### subgroup analysis
-
+- site is not included as a covariate
 ```{r bacteremia_pre_LIC_subgroup, echo= FALSE, message=FALSE, fig.width = 9, fig.height = 6}
 # table1(~ LIC_level_1_binary + age_at_ce + gender + transplant_type_combined + scd_type| bacteremia, 
 #       data = pre_LIC_bac %>% mutate(bacteremia = ifelse(!bacteremia, "No bacteremia", "Bacteremia")) %>%
@@ -1565,20 +2641,20 @@ cox_sum(LIC_bac) %>% prettify_kable()
 
 # 0 is censored/survived, 1 is death
 # exclude match_status and graft_manip
-LIC_bac_aa <- coxph(Surv(bacteremia_time_1yr_censored/365.25, bacteremia) ~ LIC_level_1_binary+ age_at_ce + gender + transplant_type_combined, 
+LIC_bac_aa <- coxph(Surv(bacteremia_time_1yr_censored/365.25, bacteremia_1yr) ~ LIC_level_1_binary+ age_at_ce + gender + transplant_type_combined, 
                 data = pre_LIC_bac %>% 
                       filter(scd_type == "aplastic anemia", transplant_type_combined != "autologous/genetherapy"))
 
-LIC_bac_scd <- coxph(Surv(bacteremia_time_1yr_censored/365.25, bacteremia) ~ LIC_level_1_binary+ age_at_ce + gender + transplant_type_combined, 
+LIC_bac_scd <- coxph(Surv(bacteremia_time_1yr_censored/365.25, bacteremia_1yr) ~ LIC_level_1_binary+ age_at_ce + gender + transplant_type_combined, 
                 data = pre_LIC_bac %>% 
                       filter(scd_type == "sickle cell disease") %>%
                       filter(transplant_type_combined != "Allogeneic: Cord Blood", , ignore.case = TRUE))
 
-LIC_bac_btm <- coxph(Surv(bacteremia_time_1yr_censored/365.25, bacteremia) ~ LIC_level_1_binary+ age_at_ce + gender + transplant_type_combined, 
+LIC_bac_btm <- coxph(Surv(bacteremia_time_1yr_censored/365.25, bacteremia_1yr) ~ LIC_level_1_binary+ age_at_ce + gender + transplant_type_combined, 
                 data = pre_LIC_bac %>% 
                       filter(scd_type == "beta thalassemia major"))
 
-LIC_bac_dba <- coxph(Surv(bacteremia_time_1yr_censored/365.25, bacteremia) ~ LIC_level_1_binary+ age_at_ce + gender + transplant_type_combined, 
+LIC_bac_dba <- coxph(Surv(bacteremia_time_1yr_censored/365.25, bacteremia_1yr) ~ LIC_level_1_binary+ age_at_ce + gender + transplant_type_combined, 
                 data = pre_LIC_bac %>% 
                       filter(scd_type == "Diamond-Blackfan anemia", !(transplant_type_combined %in% c("autologous/genetherapy", "Unknown"))))
 
@@ -1702,22 +2778,531 @@ ggsurvplot(km_LIC_bac,
 
 ##### Multivariate Cox regression analysis: 
 ```{r bacteremia_pre_LIC_subgroup_aa}
-cox_sum(ferritin_bac_aa) %>% prettify_kable()
+cox_sum(LIC_bac_aa) %>% prettify_kable()
 ```
 
 #### sickle cell disease
 ```{r bacteremia_pre_LIC_subgroup_scd}
-cox_sum(ferritin_bac_scd) %>% prettify_kable()
+cox_sum(LIC_bac_scd) %>% prettify_kable()
 ```
 
 #### beta thalassemia major
 ```{r bacteremia_pre_LIC_subgroup_btm}
-cox_sum(ferritin_bac_btm) %>% prettify_kable()
+cox_sum(LIC_bac_btm) %>% prettify_kable()
 ```
 
 #### Diamond-Blackfan anemia
 ```{r bacteremia_pre_LIC_subgroup_dba}
-cox_sum(ferritin_bac_dba) %>% prettify_kable()
+cox_sum(LIC_bac_dba) %>% prettify_kable()
+```
+
+## Bacteremia stratified by <span style="color:red">pre-transplant LIC levels</span> LIC cut-off = 5 mg Fe/g dry wt - **1 year post transplant, exclude Site 6 & 8**
+### KM curves:
+```{r bacteremia_pre_LIC_km_2}
+pre_LIC_bac_2 <- pre_LIC_cox %>% 
+                          filter(! site %in% c("site_6", "site_8")) %>%
+                          mutate(bacteremia_1yr = ifelse(is.na(bacteremia_1yr), FALSE, bacteremia_1yr)) %>%
+                          mutate(LIC_level_1_binary_8 = LIC_level_1_binary) %>% # using a cut-off of 8
+                          mutate(LIC_level_1_binary = if_else(LIC <5, "low", "high")) %>% # using a cut-off of 5
+                          mutate(LIC_level_1_binary = relevel(as.factor(LIC_level_1_binary), ref = "low"))
+
+table1(~ LIC_level_1_binary + age_at_ce + gender + transplant_type_combined + site| bacteremia_1yr, 
+      data = pre_LIC_bac_2 %>% mutate(bacteremia_1yr = ifelse(!bacteremia_1yr, "No bacteremia", "Bacteremia")),
+      caption = "Bacteremia 1-yr post transplant for LIC cut-off = 5 mg Fe/g dry wt-- entire cohort")
+
+table1(~ LIC_level_1_binary_8 | bacteremia_1yr + scd_type,
+      data = pre_LIC_bac_2 %>% mutate(bacteremia_1yr = ifelse(!bacteremia_1yr, "No bacteremia", "Bacteremia")),
+      overall = FALSE,
+      caption = "Bacteremia 1-yr post transplant for LIC cut-off = 8 mg Fe/g dry wt")
+
+table1(~ LIC_level_1_binary | bacteremia_1yr + scd_type, 
+      data = pre_LIC_bac_2 %>% 
+            mutate(bacteremia_1yr = ifelse(!bacteremia_1yr, "No bacteremia", "Bacteremia")),
+      overall = FALSE,
+      caption = "Bacteremia 5-yr post transplant for LIC cut-off = 5 mg Fe/g dry wt")
+
+km_LIC_bac_2 <- survfit(Surv(bacteremia_time_1yr_censored/365.25, bacteremia_1yr) ~ LIC_level_1_binary,   
+                    data = pre_LIC_bac_2)
+
+ggsurvplot(km_LIC_bac_2,
+          pval = TRUE, conf.int = FALSE,
+          risk.table = TRUE, # Add risk table
+          risk.table.col = "strata", # Change risk table color by groups
+          linetype = "strata", # Change line type by groups
+          surv.median.line = "hv", # Specify median survival
+          ggtheme = theme_bw(), # Change ggplot2 theme
+          xlab = "Time (Years)",   # customize X axis label.
+          ylab = "Overall Survival", 
+          title = "Kaplan-Meier curves for bacteremia probability using pre-transplant LIC levels",
+          legend.labs = c("Low", "High"),    # change legend labels.
+          palette = c("green", "blue"))
+```
+
+### Multivariate Cox regression analysis: 
+- Cox proportional hazard model accounting for: 
+  - Bacteremia vs no-bacteremia (ref) within 1 yr following transplant
+  - LIC levels: high vs. low (ref), **using the most recent LIC values with binary cut-off of 5**
+  - Age, sex, transplant match
+- Subgroup analyses: disease type
+
+```{r bacteremia_pre_LIC_2, echo= FALSE, message=FALSE, fig.width = 9, fig.height = 6}
+# pre_ferritin_cox %>% group_by(survival_5yr, transplant_type_combined) %>% summarise(n = n_distinct(record_id)) %>% view()
+
+
+# 0 is censored/survived, 1 is death
+# exclude match_status and graft_manip
+LIC_bac_2 <- coxph(Surv(bacteremia_time_1yr_censored/365.25, bacteremia_1yr) ~ LIC_level_1_binary+ age_at_ce + gender + transplant_type_combined + site, 
+                data = pre_LIC_bac_2 %>% 
+                    mutate(no_bacteremia_1yr = ifelse(bacteremia_1yr, FALSE, TRUE))) #%>%
+                    # mutate(site = relevel(as.factor(site), ref = "chop")))
+
+# pre_ferritin_cox_1 %>% group_by(ferritin_pre, gender, transplant_type_combined, has_busulfan) %>%
+#                       summarise(n_distinct(record_id))
+# visualiza the impact on iron levels
+LIC_levels_df_2 <- with(pre_LIC_bac_2,
+               data.frame(LIC_level_1_binary = c("low", "high"), 
+                          age_at_ce = rep(mean(age_at_ce, na.rm = TRUE), 2),
+                          gender = rep("Female", 2),
+                          transplant_type_combined = rep("matched related",2),
+                          has_busulfan = rep("No", 2),
+                          site = c("site_1", "site_1")
+                          )
+               )
+
+fit_2 <- survfit(LIC_bac_2, newdata = LIC_levels_df_2)
+ggsurvplot(fit_2, data = LIC_levels_df_2, 
+                  conf.int = FALSE, 
+                  legend.labs = c("Low", "High"),
+                  legend.title = "Pre-transplant LIC levels", 
+                  xlab = "Years", ylab = "Probability of bacteremia",
+                  xlim = c(0, 1), ylim = c(0, .5), 
+                  risk.table = TRUE,
+                  fun = "event",
+                  palette = c("green", "blue"), # custom color palette
+                  ggtheme = theme(
+    plot.title = element_text(size = plot_title_text_size),    # Title text size
+    axis.title.x = element_text(size = axis_text_size), # X-axis title size
+    axis.title.y = element_text(size = axis_text_size), # Y-axis title size
+    axis.text.x = element_text(size = axis_text_size),  # X-axis labels size
+    axis.text.y = element_text(size = axis_text_size),   # Y-axis labels size
+    legend.title = element_text(size = axis_text_size),    # Legend title size
+    legend.text = element_text(size = axis_text_size))) #, risk.table.title = "test")
+  
+```
+
+```{r bacteremia_pre_LIC_sum_2, echo= FALSE, message=FALSE}
+# summary(res.cox)
+cox_sum(LIC_bac_2) %>% prettify_kable()
+```
+
+### subgroup analysis
+- site is not included as a covariate
+```{r bacteremia_pre_LIC_subgroup_2, echo= FALSE, message=FALSE, fig.width = 9, fig.height = 6}
+# table1(~ LIC_level_1_binary + age_at_ce + gender + transplant_type_combined + scd_type| bacteremia, 
+#       data = pre_LIC_bac %>% mutate(bacteremia = ifelse(!bacteremia, "No bacteremia", "Bacteremia")) %>%
+#               filter(scd_type  == "Diamond-Blackfan anemia"))
+
+# 0 is censored/survived, 1 is death
+# exclude match_status and graft_manip
+LIC_bac_aa_2 <- coxph(Surv(bacteremia_time_1yr_censored/365.25, bacteremia_1yr) ~ LIC_level_1_binary+ age_at_ce + gender + transplant_type_combined, 
+                data = pre_LIC_bac_2 %>% 
+                      filter(scd_type == "aplastic anemia", transplant_type_combined != "autologous/genetherapy"))
+
+LIC_bac_scd_2 <- coxph(Surv(bacteremia_time_1yr_censored/365.25, bacteremia_1yr) ~ LIC_level_1_binary+ age_at_ce + gender + transplant_type_combined, 
+                data = pre_LIC_bac_2 %>% 
+                      filter(scd_type == "sickle cell disease") %>%
+                      filter(transplant_type_combined != "Allogeneic: Cord Blood", , ignore.case = TRUE))
+
+LIC_bac_btm_2 <- coxph(Surv(bacteremia_time_1yr_censored/365.25, bacteremia_1yr) ~ LIC_level_1_binary+ age_at_ce + gender + transplant_type_combined, 
+                data = pre_LIC_bac_2 %>% 
+                      filter(scd_type == "beta thalassemia major"))
+
+LIC_bac_dba_2 <- coxph(Surv(bacteremia_time_1yr_censored/365.25, bacteremia_1yr) ~ LIC_level_1_binary+ age_at_ce + gender + transplant_type_combined, 
+                data = pre_LIC_bac_2 %>% 
+                      filter(scd_type == "Diamond-Blackfan anemia", !(transplant_type_combined %in% c("autologous/genetherapy", "Unknown"))))
+
+# pre_ferritin_cox_1 %>% group_by(ferritin_pre, gender, transplant_type_combined, has_busulfan) %>%
+#                       summarise(n_distinct(record_id))
+# visualiza the impact on iron levels
+LIC_levels_df_2 <- with(pre_LIC_bac_2,
+               data.frame(LIC_level_1_binary = c("low", "high"), 
+                          age_at_ce = rep(mean(age_at_ce, na.rm = TRUE), 2),
+                          gender = rep("Female", 2),
+                          transplant_type_combined = rep("matched related",2),
+                          has_busulfan = rep("No", 2)
+                          )
+               )
+
+fit_aa_2 <- survfit(LIC_bac_aa_2, newdata = LIC_levels_df_2)
+fit_scd_2 <- survfit(LIC_bac_scd_2, newdata = LIC_levels_df_2)
+fit_btm_2 <- survfit(LIC_bac_btm_2, newdata = LIC_levels_df_2)
+fit_dba_2 <- survfit(LIC_bac_dba_2, newdata = LIC_levels_df_2)
+
+p_aa_2 <- ggsurvplot(fit_aa_2, data = LIC_levels_df_2, 
+                  conf.int = FALSE, 
+                  # legend = "none",
+                  title = "Aplastic anemia", 
+                  legend.labs = c("Low", "High"),
+                  legend.title = "Pre-transplant LIC levels", 
+                  xlab = "Years", ylab = "Probability of bacteremia",
+                  xlim = c(0, 1), ylim = c(0, .75), 
+                  risk.table = TRUE,
+                  fun = "event",
+                  palette = c("red", "blue"), # custom color palette
+                  ggtheme = theme(
+    plot.title = element_text(size = plot_title_text_size),    # Title text size
+    axis.title.x = element_text(size = axis_text_size), # X-axis title size
+    axis.title.y = element_text(size = axis_text_size), # Y-axis title size
+    axis.text.x = element_text(size = axis_text_size),  # X-axis labels size
+    axis.text.y = element_text(size = axis_text_size),   # Y-axis labels size
+    legend.title = element_text(size = axis_text_size),    # Legend title size
+    legend.text = element_text(size = axis_text_size))) #, risk.table.title = "test")
+
+p_scd_2 <- ggsurvplot(fit_scd_2, data = LIC_levels_df_2, 
+                  conf.int = FALSE, 
+                  legend = "none",
+                  title = "sickle cell anemia", 
+                  # legend.labs = c("Low", "High"),
+                  # legend.title = "Pre-transplant LIC levels", 
+                  xlab = "Years", ylab = "Probability of bacteremia",
+                  xlim = c(0, 1), ylim = c(0, .75), 
+                  risk.table = TRUE,
+                  fun = "event",
+                  palette = c("red", "blue"), # custom color palette
+                  ggtheme = theme(
+    plot.title = element_text(size = plot_title_text_size),    # Title text size
+    axis.title.x = element_text(size = axis_text_size), # X-axis title size
+    axis.title.y = element_text(size = axis_text_size), # Y-axis title size
+    axis.text.x = element_text(size = axis_text_size),  # X-axis labels size
+    axis.text.y = element_text(size = axis_text_size),   # Y-axis labels size
+    legend.title = element_text(size = axis_text_size),    # Legend title size
+    legend.text = element_text(size = axis_text_size))) #, risk.table.title = "test")
+
+p_btm_2 <- ggsurvplot(fit_btm_2, data = LIC_levels_df_2, 
+                  conf.int = FALSE, 
+                  legend = "none",
+                  title = "beta thalassemia major", 
+                  # legend.labs = c("Low", "High"),
+                  # legend.title = "Pre-transplant LIC levels", 
+                  xlab = "Years", ylab = "Probability of bacteremia",
+                  xlim = c(0, 1), ylim = c(0, .75), 
+                  risk.table = TRUE,
+                  fun = "event",
+                  palette = c("red", "blue"), # custom color palette
+                  ggtheme = theme(
+    plot.title = element_text(size = plot_title_text_size),    # Title text size
+    axis.title.x = element_text(size = axis_text_size), # X-axis title size
+    axis.title.y = element_text(size = axis_text_size), # Y-axis title size
+    axis.text.x = element_text(size = axis_text_size),  # X-axis labels size
+    axis.text.y = element_text(size = axis_text_size),   # Y-axis labels size
+    legend.title = element_text(size = axis_text_size),    # Legend title size
+    legend.text = element_text(size = axis_text_size))) #, risk.table.title = "test")
+
+p_dba_2 <- ggsurvplot(fit_dba_2, data = LIC_levels_df_2, 
+                  conf.int = FALSE, 
+                  title = "Diamond-Blackfan anemia", 
+                  legend = "none", 
+                  xlab = "Years", ylab = "Probability of bacteremia",
+                  xlim = c(0, 1), ylim = c(0, .75), 
+                  risk.table = TRUE,
+                  fun = "event",
+                  palette = c("red", "blue"), # custom color palette
+                  ggtheme = theme(
+    plot.title = element_text(size = plot_title_text_size),    # Title text size
+    axis.title.x = element_text(size = axis_text_size), # X-axis title size
+    axis.title.y = element_text(size = axis_text_size), # Y-axis title size
+    axis.text.x = element_text(size = axis_text_size),  # X-axis labels size
+    axis.text.y = element_text(size = axis_text_size),   # Y-axis labels size
+    legend.position = "none")) #, risk.table.title = "test")
+  
+grid.arrange(p_aa_2$plot, p_scd_2$plot, p_btm_2$plot, p_dba_2$plot, ncol = 2, nrow = 2)
+```
+
+#### aplastic anemia
+##### KM curves
+```{r bacteremia_pre_LIC_subgroup_aa_km_2}
+km_LIC_bac_2 <- survfit(Surv(bacteremia_time_1yr_censored/365.25, bacteremia) ~ LIC_level_1_binary,   
+                    data = pre_LIC_bac_2 %>% 
+                    filter(scd_type == "aplastic anemia", transplant_type_combined != "autologous/genetherapy"))
+
+ggsurvplot(km_LIC_bac_2,
+          pval = TRUE, conf.int = FALSE,
+          risk.table = TRUE, # Add risk table
+          risk.table.col = "strata", # Change risk table color by groups
+          linetype = "strata", # Change line type by groups
+          surv.median.line = "hv", # Specify median survival
+          ggtheme = theme_bw(), # Change ggplot2 theme
+          xlab = "Time (Years)",   # customize X axis label.
+          ylab = "Overall Survival", 
+          title = "Kaplan-Meier curves for bacteremia probability using pre-transplant LIC levels --- aplastic anemia",
+          legend.labs = c("Low", "High"),    # change legend labels.
+          palette = c("red", "blue"))
+```
+
+##### Multivariate Cox regression analysis: 
+```{r bacteremia_pre_LIC_subgroup_aa_2}
+cox_sum(LIC_bac_aa_2) %>% prettify_kable()
+```
+
+#### sickle cell disease
+```{r bacteremia_pre_LIC_subgroup_scd_2}
+cox_sum(LIC_bac_scd_2) %>% prettify_kable()
+```
+
+#### beta thalassemia major
+```{r bacteremia_pre_LIC_subgroup_btm_2}
+cox_sum(LIC_bac_btm_2) %>% prettify_kable()
+```
+
+#### Diamond-Blackfan anemia
+```{r bacteremia_pre_LIC_subgroup_dba_2}
+cox_sum(LIC_bac_dba_2) %>% prettify_kable()
+```
+
+## Bacteremia stratified by <span style="color:red">pre-transplant LIC levels</span> LIC cut-off = 5 mg Fe/g dry wt - 6 months post-transplant
+### KM curves:
+```{r bacteremia_pre_LIC_km_6mon}
+
+table1(~ LIC_level_1_binary + age_at_ce + gender + transplant_type_combined + site| bacteremia_6mon, 
+      data = pre_LIC_bac %>% mutate(bacteremia_6mon = ifelse(!bacteremia_6mon, "No bacteremia", "Bacteremia")),
+      caption = "Bacteremia 6 months post transplant for LIC cut-off = 5 mg Fe/g dry wt-- entire cohort")
+
+km_LIC_bac_6mon <- survfit(Surv(bacteremia_time_6mon_censored/30, bacteremia_6mon) ~ LIC_level_1_binary,   
+                    data = pre_LIC_bac)
+
+ggsurvplot(km_LIC_bac_6mon,
+          pval = TRUE, conf.int = FALSE,
+          risk.table = TRUE, # Add risk table
+          risk.table.col = "strata", # Change risk table color by groups
+          linetype = "strata", # Change line type by groups
+          surv.median.line = "hv", # Specify median survival
+          ggtheme = theme_bw(), # Change ggplot2 theme
+          xlab = "Time (Monrhs)",   # customize X axis label.
+          ylab = "Overall Survival", 
+          title = "Kaplan-Meier curves for bacteremia probability using pre-transplant LIC levels",
+          legend.labs = c("Low", "High"),    # change legend labels.
+          palette = c("green", "blue"))
+```
+
+### Multivariate Cox regression analysis: 
+- Cox proportional hazard model accounting for: 
+  - Bacteremia vs no-bacteremia (ref) within 1 yr following transplant
+  - LIC levels: high vs. low (ref), **using the most recent LIC values with binary cut-off of 5**
+  - Age, sex, transplant match
+- Subgroup analyses: disease type
+
+```{r bacteremia_pre_LIC_6mon, echo= FALSE, message=FALSE, fig.width = 9, fig.height = 6}
+# pre_ferritin_cox %>% group_by(survival_5yr, transplant_type_combined) %>% summarise(n = n_distinct(record_id)) %>% view()
+
+
+# 0 is censored/survived, 1 is death
+# exclude match_status and graft_manip
+LIC_bac_6mon <- coxph(Surv(bacteremia_time_6mon_censored/30, bacteremia_6mon) ~ LIC_level_1_binary+ age_at_ce + gender + transplant_type_combined + site, 
+                data = pre_LIC_bac %>% 
+                    mutate(no_bacteremia = ifelse(bacteremia_6mon, FALSE, TRUE))) #%>%
+                    # mutate(site = relevel(as.factor(site), ref = "chop")))
+
+# pre_ferritin_cox_1 %>% group_by(ferritin_pre, gender, transplant_type_combined, has_busulfan) %>%
+#                       summarise(n_distinct(record_id))
+# visualiza the impact on iron levels
+LIC_levels_df <- with(pre_LIC_bac,
+               data.frame(LIC_level_1_binary = c("low", "high"), 
+                          age_at_ce = rep(mean(age_at_ce, na.rm = TRUE), 2),
+                          gender = rep("Female", 2),
+                          transplant_type_combined = rep("matched related",2),
+                          has_busulfan = rep("No", 2),
+                          site = c("site_1", "site_1")
+                          )
+               )
+
+fit <- survfit(LIC_bac_6mon, newdata = LIC_levels_df)
+ggsurvplot(fit, data = LIC_levels_df, 
+                  conf.int = FALSE, 
+                  legend.labs = c("Low", "High"),
+                  legend.title = "Pre-transplant LIC levels", 
+                  xlab = "Months", ylab = "Probability of bacteremia",
+                  xlim = c(0, 6), ylim = c(0, .5), 
+                  risk.table = TRUE,
+                  fun = "event",
+                  palette = c("green", "blue"), # custom color palette
+                  ggtheme = theme(
+    plot.title = element_text(size = plot_title_text_size),    # Title text size
+    axis.title.x = element_text(size = axis_text_size), # X-axis title size
+    axis.title.y = element_text(size = axis_text_size), # Y-axis title size
+    axis.text.x = element_text(size = axis_text_size),  # X-axis labels size
+    axis.text.y = element_text(size = axis_text_size),   # Y-axis labels size
+    legend.title = element_text(size = axis_text_size),    # Legend title size
+    legend.text = element_text(size = axis_text_size))) #, risk.table.title = "test")
+  
+```
+
+```{r bacteremia_pre_LIC_sum_6mon, echo= FALSE, message=FALSE}
+# summary(res.cox)
+cox_sum(LIC_bac_6mon) %>% prettify_kable()
+```
+
+### subgroup analysis
+- site is not included as a covariate
+```{r bacteremia_pre_LIC_subgroup_6mon, echo= FALSE, message=FALSE, fig.width = 9, fig.height = 6}
+# table1(~ LIC_level_1_binary + age_at_ce + gender + transplant_type_combined + scd_type| bacteremia, 
+#       data = pre_LIC_bac %>% mutate(bacteremia = ifelse(!bacteremia, "No bacteremia", "Bacteremia")) %>%
+#               filter(scd_type  == "Diamond-Blackfan anemia"))
+
+# 0 is censored/survived, 1 is death
+# exclude match_status and graft_manip
+LIC_bac_aa_6mon <- coxph(Surv(bacteremia_time_6mon_censored/30, bacteremia_6mon) ~ LIC_level_1_binary+ age_at_ce + gender + transplant_type_combined, 
+                data = pre_LIC_bac %>% 
+                      filter(scd_type == "aplastic anemia", transplant_type_combined != "autologous/genetherapy"))
+
+LIC_bac_scd_6mon <- coxph(Surv(bacteremia_time_6mon_censored/30, bacteremia_6mon) ~ LIC_level_1_binary+ age_at_ce + gender + transplant_type_combined, 
+                data = pre_LIC_bac %>% 
+                      filter(scd_type == "sickle cell disease") %>%
+                      filter(transplant_type_combined != "Allogeneic: Cord Blood", , ignore.case = TRUE))
+
+LIC_bac_btm_6mon <- coxph(Surv(bacteremia_time_6mon_censored/30, bacteremia_6mon) ~ LIC_level_1_binary+ age_at_ce + gender + transplant_type_combined, 
+                data = pre_LIC_bac %>% 
+                      filter(scd_type == "beta thalassemia major"))
+
+LIC_bac_dba_6mon <- coxph(Surv(bacteremia_time_6mon_censored/30, bacteremia_6mon) ~ LIC_level_1_binary+ age_at_ce + gender + transplant_type_combined, 
+                data = pre_LIC_bac %>% 
+                      filter(scd_type == "Diamond-Blackfan anemia", !(transplant_type_combined %in% c("autologous/genetherapy", "Unknown"))))
+
+# pre_ferritin_cox_1 %>% group_by(ferritin_pre, gender, transplant_type_combined, has_busulfan) %>%
+#                       summarise(n_distinct(record_id))
+# visualiza the impact on iron levels
+LIC_levels_df_6mon <- with(pre_LIC_bac,
+               data.frame(LIC_level_1_binary = c("low", "high"), 
+                          age_at_ce = rep(mean(age_at_ce, na.rm = TRUE), 2),
+                          gender = rep("Female", 2),
+                          transplant_type_combined = rep("matched related",2),
+                          has_busulfan = rep("No", 2)
+                          )
+               )
+
+fit_aa_6mon <- survfit(LIC_bac_aa_6mon, newdata = LIC_levels_df)
+fit_scd_6mon <- survfit(LIC_bac_scd_6mon, newdata = LIC_levels_df)
+fit_btm_6mon <- survfit(LIC_bac_btm_6mon, newdata = LIC_levels_df)
+fit_dba_6mon <- survfit(LIC_bac_dba_6mon, newdata = LIC_levels_df)
+
+p_aa_6mon <- ggsurvplot(fit_aa_6mon, data = LIC_levels_df_6mon, 
+                  conf.int = FALSE, 
+                  # legend = "none",
+                  title = "Aplastic anemia", 
+                  legend.labs = c("Low", "High"),
+                  legend.title = "Pre-transplant LIC levels", 
+                  xlab = "Months", ylab = "Probability of bacteremia",
+                  xlim = c(0, 6), ylim = c(0, .5), 
+                  risk.table = TRUE,
+                  fun = "event",
+                  palette = c("red", "blue"), # custom color palette
+                  ggtheme = theme(
+    plot.title = element_text(size = plot_title_text_size),    # Title text size
+    axis.title.x = element_text(size = axis_text_size), # X-axis title size
+    axis.title.y = element_text(size = axis_text_size), # Y-axis title size
+    axis.text.x = element_text(size = axis_text_size),  # X-axis labels size
+    axis.text.y = element_text(size = axis_text_size),   # Y-axis labels size
+    legend.title = element_text(size = axis_text_size),    # Legend title size
+    legend.text = element_text(size = axis_text_size))) #, risk.table.title = "test")
+
+p_scd_6mon <- ggsurvplot(fit_scd_6mon, data = LIC_levels_df_6mon, 
+                  conf.int = FALSE, 
+                  legend = "none",
+                  title = "sickle cell anemia", 
+                  # legend.labs = c("Low", "High"),
+                  # legend.title = "Pre-transplant LIC levels", 
+                  xlab = "Months", ylab = "Probability of bacteremia",
+                  xlim = c(0, 6), ylim = c(0, .5), 
+                  risk.table = TRUE,
+                  fun = "event",
+                  palette = c("red", "blue"), # custom color palette
+                  ggtheme = theme(
+    plot.title = element_text(size = plot_title_text_size),    # Title text size
+    axis.title.x = element_text(size = axis_text_size), # X-axis title size
+    axis.title.y = element_text(size = axis_text_size), # Y-axis title size
+    axis.text.x = element_text(size = axis_text_size),  # X-axis labels size
+    axis.text.y = element_text(size = axis_text_size),   # Y-axis labels size
+    legend.title = element_text(size = axis_text_size),    # Legend title size
+    legend.text = element_text(size = axis_text_size))) #, risk.table.title = "test")
+
+p_btm_6mon <- ggsurvplot(fit_btm_6mon, data = LIC_levels_df_6mon, 
+                  conf.int = FALSE, 
+                  legend = "none",
+                  title = "beta thalassemia major", 
+                  # legend.labs = c("Low", "High"),
+                  # legend.title = "Pre-transplant LIC levels", 
+                  xlab = "Months", ylab = "Probability of bacteremia",
+                  xlim = c(0, 6), ylim = c(0, .5), 
+                  risk.table = TRUE,
+                  fun = "event",
+                  palette = c("red", "blue"), # custom color palette
+                  ggtheme = theme(
+    plot.title = element_text(size = plot_title_text_size),    # Title text size
+    axis.title.x = element_text(size = axis_text_size), # X-axis title size
+    axis.title.y = element_text(size = axis_text_size), # Y-axis title size
+    axis.text.x = element_text(size = axis_text_size),  # X-axis labels size
+    axis.text.y = element_text(size = axis_text_size),   # Y-axis labels size
+    legend.title = element_text(size = axis_text_size),    # Legend title size
+    legend.text = element_text(size = axis_text_size))) #, risk.table.title = "test")
+
+p_dba_6mon <- ggsurvplot(fit_dba_6mon, data = LIC_levels_df_6mon, 
+                  conf.int = FALSE, 
+                  title = "Diamond-Blackfan anemia", 
+                  legend = "none", 
+                  xlab = "Years", ylab = "Probability of bacteremia",
+                  xlim = c(0, 6), ylim = c(0, .5), 
+                  risk.table = TRUE,
+                  fun = "event",
+                  palette = c("red", "blue"), # custom color palette
+                  ggtheme = theme(
+    plot.title = element_text(size = plot_title_text_size),    # Title text size
+    axis.title.x = element_text(size = axis_text_size), # X-axis title size
+    axis.title.y = element_text(size = axis_text_size), # Y-axis title size
+    axis.text.x = element_text(size = axis_text_size),  # X-axis labels size
+    axis.text.y = element_text(size = axis_text_size),   # Y-axis labels size
+    legend.position = "none")) #, risk.table.title = "test")
+  
+grid.arrange(p_aa_6mon$plot, p_scd_6mon$plot, p_btm_6mon$plot, p_dba_6mon$plot, ncol = 2, nrow = 2)
+```
+
+#### aplastic anemia
+##### KM curves
+```{r bacteremia_pre_LIC_subgroup_aa_km_6mon}
+km_LIC_bac_6mon <- survfit(Surv(bacteremia_time_6mon_censored/30, bacteremia_6mon) ~ LIC_level_1_binary,   
+                    data = pre_LIC_bac %>% 
+                    filter(scd_type == "aplastic anemia", transplant_type_combined != "autologous/genetherapy"))
+
+ggsurvplot(km_LIC_bac_6mon,
+          pval = TRUE, conf.int = FALSE,
+          risk.table = TRUE, # Add risk table
+          risk.table.col = "strata", # Change risk table color by groups
+          linetype = "strata", # Change line type by groups
+          surv.median.line = "hv", # Specify median survival
+          ggtheme = theme_bw(), # Change ggplot2 theme
+          xlab = "Time (Months)",   # customize X axis label.
+          ylab = "Overall Survival", 
+          title = "Kaplan-Meier curves for bacteremia probability using pre-transplant LIC levels --- aplastic anemia",
+          legend.labs = c("Low", "High"),    # change legend labels.
+          palette = c("red", "blue"))
+```
+
+##### Multivariate Cox regression analysis: 
+```{r bacteremia_pre_LIC_subgroup_aa_6mon}
+cox_sum(LIC_bac_aa_6mon) %>% prettify_kable()
+```
+
+#### sickle cell disease
+```{r bacteremia_pre_LIC_subgroup_scd_6mon}
+cox_sum(LIC_bac_scd_6mon) %>% prettify_kable()
+```
+
+#### beta thalassemia major
+```{r bacteremia_pre_LIC_subgroup_btm_6mon}
+cox_sum(LIC_bac_btm_6mon) %>% prettify_kable()
+```
+
+#### Diamond-Blackfan anemia
+```{r bacteremia_pre_LIC_subgroup_dba_6mon}
+cox_sum(LIC_bac_dba_6mon) %>% prettify_kable()
 ```
 
 # VOD
@@ -1733,9 +3318,10 @@ pre_ferritin_vod_lr <- pre_ferritin_cox %>%
                           filter(has_busulfan == "Yes") %>%
                           mutate(vod = ifelse(vod, "Yes", "No")) %>%
                           mutate(vod= relevel(factor(vod), ref = "No")) %>%
-                          mutate(transplant_type_combined = relevel(factor(transplant_type_combined), ref = "matched related"))
+                          mutate(transplant_type_combined = relevel(factor(transplant_type_combined), ref = "matched related")) #%>%
+                          # mutate(site = relevel(as.factor(site), ref = "chop"))
 
-vod_fit <- glm_weightit(formula = vod ~ gender + age_at_ce +  ferritin_pre,
+vod_fit <- glm_weightit(formula = vod ~ gender + age_at_ce +  ferritin_pre + site,
             data = pre_ferritin_vod_lr, 
             family = "binomial", link = "logit", estimand = "ATT")
 
@@ -1750,10 +3336,12 @@ p1 <- p1 + scale_y_discrete(labels = c("High ferritin", "Moderate ferritin", "Ag
       labs(x = "Odds ratio", y = "")
 print(p1)
 
-table1(~scd_type|vod, data = pre_ferritin_vod_lr)
+table1(~scd_type|ferritin_pre*vod, data = pre_ferritin_vod_lr)
 ```
 
 ### subgroup analysis
+- For Diamond-Blackfan anemia, all patients are in the low-moderate ferritin groups, thus, no analysis was done for this subgroup 
+- Site is not included as a covariate
 ```{r vod_preferritin_subgroups, fig.width = 6, fig.height = 4}
 
 vod_fit_scd <- glm_weightit(formula = vod ~ gender + age_at_ce +  ferritin_pre,
@@ -1762,22 +3350,22 @@ vod_fit_scd <- glm_weightit(formula = vod ~ gender + age_at_ce +  ferritin_pre,
 vod_fit_btm <- glm_weightit(formula = vod ~ gender + age_at_ce +  ferritin_pre,
             data = pre_ferritin_vod_lr %>% filter(scd_type == "beta thalassemia major"), 
             family = "binomial", link = "logit", estimand = "ATT")
-vod_fit_dba <- glm_weightit(formula = vod ~ gender + age_at_ce +  ferritin_pre,
-            data = pre_ferritin_vod_lr %>% filter(scd_type == "Diamond-Blackfan anemia"), 
-            family = "binomial", link = "logit", estimand = "ATT")
+# vod_fit_dba <- glm_weightit(formula = vod ~ gender + age_at_ce +  ferritin_pre,
+#             data = pre_ferritin_vod_lr %>% filter(scd_type == "Diamond-Blackfan anemia"), 
+#             family = "binomial", link = "logit", estimand = "ATT")
 vod_fit_aa <- glm_weightit(formula = vod ~ gender + age_at_ce +  ferritin_pre,
             data = pre_ferritin_vod_lr %>% filter(scd_type == "aplastic anemia"), 
             family = "binomial", link = "logit", estimand = "ATT")
 
-export_summs(vod_fit_aa, vod_fit_scd, vod_fit_btm, vod_fit_dba, scale = TRUE,
+export_summs(vod_fit_aa, vod_fit_scd, vod_fit_btm, scale = TRUE,
              error_format = "[{conf.low}, {conf.high}]", #p = {p.value}, 
              exp = TRUE,
-             model.names = c("aplastic anemia", "sickle cell disease", "beta thalassemia major", "Diamond-Blackfan anemia"))
+             model.names = c("aplastic anemia", "sickle cell disease", "beta thalassemia major"))
 
 # sjPlot::tab_model(unweighted, title = "Odds of having masked hypertension for all age groups UNWEIGHTED")
-p2 <- plot_summs(vod_fit_aa, vod_fit_scd, vod_fit_btm, vod_fit_dba, 
+p2 <- plot_summs(vod_fit_aa, vod_fit_scd, vod_fit_btm, 
         exp = TRUE,
-        model.names = c("aplastic anemia", "sickle cell disease", "beta thalassemia major", "Diamond-Blackfan anemia"))
+        model.names = c("aplastic anemia", "sickle cell disease", "beta thalassemia major"))
 p2 <- p2 + scale_y_discrete(labels = c("High ferritin", "Moderate ferritin", "Age at transplant", "Male")) + 
       labs(x = "Odds ratio", y = "")
 print(p2)
@@ -1797,7 +3385,8 @@ pre_LIC_vod_lr <- pre_LIC_cox %>%
                           filter(has_busulfan == "Yes") %>%
                           mutate(vod = ifelse(vod, "Yes", "No")) %>%
                           mutate(vod= relevel(factor(vod), ref = "No")) %>%
-                          mutate(transplant_type_combined = relevel(factor(transplant_type_combined), ref = "matched related"))
+                          mutate(transplant_type_combined = relevel(factor(transplant_type_combined), ref = "matched related")) #%>%
+                          # mutate(site = relevel(as.factor(site), ref = "chop"))
 
 vod_fit <- glm_weightit(formula = vod ~ gender + age_at_ce +  LIC_level_1_binary,
             data = pre_LIC_vod_lr, 
@@ -1814,7 +3403,7 @@ p3 <- p3 + scale_y_discrete(labels = c("High LIC", "Age at transplant", "Male"))
       labs(x = "Odds ratio", y = "")
 print(p3)
 
-table1(~scd_type|vod, data = pre_LIC_vod_lr)
+table1(~scd_type + site|LIC_level_1_binary*vod, data = pre_LIC_vod_lr)
 ```
 
 ### subgroup analysis
@@ -1864,9 +3453,10 @@ ferritin <- results_tbl("covar_ferritin_mx") %>% select(person_id, ferritin, fer
 LIC_ferritin <- LIC %>% inner_join(ferritin, by = "person_id") %>%
     collect() %>%
     mutate(LIC_ferritin_period = abs(as.numeric(difftime(LIC_date, ferritin_date, units = "days")))) %>%
-    filter(LIC_ferritin_period <= 180) %>%
+    # filter(LIC_ferritin_period <= 180) %>%
     group_by(record_id, LIC_date) %>% #if a single value matches to multiple values, take the closet one
-    slice_min(LIC_ferritin_period, with_ties = FALSE, na_rm = TRUE)
+    slice_min(LIC_ferritin_period, with_ties = FALSE, na_rm = TRUE) %>%
+    mutate(LIC = if_else(record_id %in% c("04_0014_cr", "04_0016_cr"), LIC**.0254+0.202, LIC))
 
 LIC_ferritin %>% ggplot(aes(x = ferritin, y = LIC)) +
   geom_point(color = "black", size = 3.5, alpha = 0.6) + # Scatter points
@@ -1878,154 +3468,639 @@ LIC_ferritin %>% ggplot(aes(x = ferritin, y = LIC)) +
                         aes(label = paste(..rr.label..)), 
                         parse = TRUE, # Enables proper superscript
                         size = 8) + # Increase text size
-  labs(title = "LIC vs. Ferritin Correlation",
+  labs(#title = "LIC vs. Ferritin Correlation",
        x = "Ferritin (ng/mL)",
        y = "LIC (mg Fe/g dry wt)") +
+  ylim(0, 60) +
   theme(plot.title = element_text(size = plot_title_text_size),    # Title text size
     axis.title.x = element_text(size = axis_text_size), # X-axis title size
     axis.title.y = element_text(size = axis_text_size), # Y-axis title size
     axis.text.x = element_text(size = axis_text_size),  # X-axis labels size
     axis.text.y = element_text(size = axis_text_size)   # Y-axis labels size
-  )  
-  # theme_minimal() 
+  ) + theme_classic()
+
+# ggsave("manuscript/figures/lic_vs_ferritin.png", p, width = 7, height = 5, dpi = 600)
+```
+
+# Platelet engraftment
+## Platelet engraftment stratified by <span style="color:red">pre-transplant ferritin levels</span>
+```{r platelet_engraft_pre_ferritin_data, echo= FALSE, message=FALSE}
+# unknown_ct <- pre_ferritin_cox %>% filter(!is.na(graft_fail_days_since_ce_5yr_censored)) %>% filter(transplant_type_combined == "Unknown") %>% nrow()
+pre_ferritin_platelet <- pre_ferritin_cox %>%
+                        filter(!is.na(platelet_engraftment_day_censored)) #%>%
+                        # site_mask() %>%
+                        # mutate(site = relevel(as.factor(site), ref = "site_1"))
+
+label(pre_ferritin_platelet$transplant_type_combined) = "match status"
+label(pre_ferritin_platelet$survival_5yr) = "Dies within 5 years of post-transplant"
+
+table1(~gender + age_at_ce + transplant_type_combined + 
+        ferritin_pre + has_busulfan + scd_type + platelet_engraftment_day_censored + 
+        site | platelet_engraftment_censored, 
+        data = pre_ferritin_platelet %>%
+                        mutate(platelet_engraftment_censored = ifelse(platelet_engraftment_censored ==1, "Platelet Engraftment w/in 60 days", "Never engrafted/death/graft failure")), 
+        overall = FALSE, 
+        caption = "Platelet engraftment at 6-month post-transplant")      
+
+table1(~ferritin_pre| platelet_engraftment_censored + scd_type, 
+        data = pre_ferritin_platelet %>%
+                        mutate(platelet_engraftment_censored = ifelse(platelet_engraftment_censored ==1, "Platelet Engraftment w/in 60 days", "Never engrafted/death/graft failure")), 
+        overall = FALSE, 
+        caption =  "Platelet engraftment at 6-month post-transplant for subgroups") 
+
+label(pre_ferritin_platelet$platelet_engraftment_day_censored) = "Time to platelet engraftment (days)"
+table1(~platelet_engraftment_day_censored|ferritin_pre, 
+        data = pre_ferritin_platelet %>% filter(platelet_engraftment_censored ==1), 
+        caption =  "Platelet engraftment at 6-month post-transplant for subgroups")      
+```
+
+- Competing risk analysis adjusted for: 
+  - pre-transplant most recent ferritin levels: low(<1000 ng/mL), moderate (1000-2500 ng/mL), or high (>=2500 ng/mL)
+  - age at transplant: continuous 
+  - gender: female (ref) or male
+  - has busulfan: yes or no
+  - Outcomes: neutrophil engraftment within 180 days. 
+  - Competing risks: death & graft failure
+- Site is included as a covariate. Please intepret the results with cautions due to the samll counts at some sites. 
+
+```{r platelet_engraft_pre_ferritin, echo= FALSE, message=FALSE, fig.width = 9, fig.height = 6}
+# 0 is censored/survived, 1 is death
+
+pre_ferritin_platelet_2 <- pre_ferritin_platelet %>% 
+                          mutate(platelet_engraftment_censored = recode(platelet_engraftment_censored, "0" = "event-free", "1" = "platelet engraftment", "2" = "death/graft failure")) %>% 
+                          mutate(platelet_engraftment_censored = factor(platelet_engraftment_censored,
+                                                  levels = c("event-free", "platelet engraftment", "death/graft failure"))) #%>%
+                          # mutate(site = relevel(as.factor(site), ref = "chop"))
+
+compRisk_ferritin_platelet <- coxph(Surv(platelet_engraftment_day_censored, platelet_engraftment_censored) ~ ferritin_pre + age_at_ce + gender + has_busulfan + site, 
+                data = pre_ferritin_platelet_2, 
+                id = record_id)
+```
+
+- In the table below: 1:2 represents transition to engraftment and 1:3 represents transition to death/graft failure without engraftment within 60 days post-transplant
+```{r platelet_engraft_pre_ferritin_sum, echo= FALSE, message=FALSE}
+res <- cox_sum(compRisk_ferritin_platelet) 
+res$covariates = rownames(res)
+rownames(res) = NULL
+res %>% filter(grepl("_1:2", covariates)) %>%
+  select(covariates, HR, `95 CI`, p_val) %>%
+  prettify_kable()
+```
+
+```{r platelet_engraft_pre_ferritin_plot}
+# Prepare transition matrix
+tmat <- trans.comprisk(2, names = c("event-free", "platelet engraftment", "death/graft failure"))
+
+# Run msprep
+pre_ferritin_platelet_2$platelet_engraft <- as.numeric(pre_ferritin_platelet_2$platelet_engraftment_censored == "platelet engraftment")
+pre_ferritin_platelet_2$comp_risk <- as.numeric(pre_ferritin_platelet_2$platelet_engraftment_censored == "death/graft failure")
+
+pre_ferritin_platelet_2_long <- msprep(
+  time = c(NA, "platelet_engraftment_day_censored", "platelet_engraftment_day_censored"), 
+  status = c(NA, "platelet_engraft", "comp_risk"), 
+  data = pre_ferritin_platelet_2, 
+  keep = c("has_busulfan","age_at_ce", "gender", "ferritin_pre"), 
+  trans = tmat)
+
+pre_ferritin_platelet_2_expanded <- expand.covs(pre_ferritin_platelet_2_long, "ferritin_pre")
+
+ferritin_cp <- coxph(Surv(time, status) ~ 
+                                  ferritin_prehigh.1 + ferritin_prehigh.2 + 
+                                  gender + 
+                                  age_at_ce + gender + has_busulfan  + 
+                                  strata(trans),
+            data = pre_ferritin_platelet_2_expanded)
+
+# Visualising cumulative baseline hazards using plot.msfit()
+# Data to predict
+# in this expanded dataset ferritin_premoderate.1 means "transition 1": event-free to graft-failure 
+
+f_low_moderate <- data.frame(
+  ferritin_prehigh.1 = c(0, 0),
+  ferritin_prehigh.2 = c(0, 0),
+  age_at_ce = c(10, 10), 
+  gender = c("Female", "Female"),
+  has_busulfan = c("No", "No"),  
+  trans = c(1, 2), 
+  strata = c(1, 2)
+)
+
+f_high <- data.frame(
+  ferritin_prehigh.1 = c(1, 0),
+  ferritin_prehigh.2 = c(0, 1),
+  age_at_ce = c(10, 10), 
+  gender = c("Female", "Female"),
+  has_busulfan = c("No", "No"),  
+  trans = c(1, 2), 
+  strata = c(1, 2)
+)
+
+# Make msfit object for each ferritin level
+msf.f_low_moderate <- msfit(object = ferritin_cp, newdata = f_low_moderate, trans = tmat)
+# msf.f_moderate <- msfit(object = ferritin_cp, newdata = f_moderate, trans = tmat)
+msf.f_high <- msfit(object = ferritin_cp, newdata = f_high, trans = tmat)
+
+# Make probtrans objects for each ferritin level
+pt.f_low_moderate <- probtrans(msf.f_low_moderate, predt = 0)
+# pt.f_moderate <- probtrans(msf.f_moderate, predt = 0)
+pt.f_high <- probtrans(msf.f_high, predt = 0)
+# if just plotting a single level, replace the c() dataset with a single one_of()
+# or call plot() instead of vis.multiple.pt()
+
+vis.multiple.pt(
+  x = list(pt.f_low_moderate, pt.f_high), 
+  from = 1,
+  to = 2, 
+  conf.type = "none",
+  # cols = c(1, 2, 3),
+  cols = c("blue", "green"), #  something is wrong with this argument
+  labels = c("Low-moderate", "High"),
+  legend.title = "Pre-transplant ferritin",
+  ylab = "Probability of platelet engraftment",
+  xlab = "Days post-transplant",
+  xlim = c(0, 180), 
+  ylim = c(0, 1)) +
+  labs(title = "Platelet engraftment") +
+  theme(plot.title = element_text(size = plot_title_text_size),    # Title text size
+    axis.title.x = element_text(size = axis_text_size), # X-axis title size
+    axis.title.y = element_text(size = axis_text_size), # Y-axis title size
+    axis.text.x = element_text(size = axis_text_size),  # X-axis labels size
+    axis.text.y = element_text(size = axis_text_size),   # Y-axis labels size
+    legend.title = element_text(size = axis_text_size),    # Legend title size
+    legend.text = element_text(size = axis_text_size)) 
+```
+
+## Platelet engraftment stratified by <span style="color:red">pre-transplant LIC levels</span>
+- Site is included as a covariate. Site_8 data is excluded. Please intepret the results with cautions due to the samll counts at some sites. 
+```{r platelet_engraft_pre_LIC_data, echo= FALSE, message=FALSE}
+# unknown_ct <- pre_ferritin_cox %>% filter(!is.na(graft_fail_days_since_ce_5yr_censored)) %>% filter(transplant_type_combined == "Unknown") %>% nrow()
+pre_LIC_platelet <- pre_LIC_cox %>% 
+                        filter(!is.na(platelet_engraftment_day_censored)) #%>%
+                        # site_mask() %>%
+                        # mutate(site = relevel(as.factor(site), ref = "site_1"))
+
+label(pre_LIC_platelet$transplant_type_combined) = "match status"
+label(pre_LIC_platelet$survival_5yr) = "Dies within 5 years of post-transplant"
+
+table1(~gender + age_at_ce + transplant_type_combined + 
+        LIC_level_1_binary + has_busulfan + scd_type + platelet_engraftment_day_censored + 
+        site | platelet_engraftment_censored, 
+        data = pre_LIC_platelet %>%
+                        mutate(platelet_engraftment_censored = ifelse(platelet_engraftment_censored ==1, "Platelet Engraftment w/in 60 days", "Never engrafted/death/graft failure")), 
+        overall = FALSE, 
+        caption = "Platelet engraftment at 6-month post-transplant")      
+
+table1(~LIC_level_1_binary| platelet_engraftment_censored + scd_type, 
+        data = pre_LIC_platelet %>%
+                        mutate(platelet_engraftment_censored = ifelse(platelet_engraftment_censored ==1, "Platelet Engraftment w/in 60 days", "Never engrafted/death/graft failure")), 
+        overall = FALSE, 
+        caption =  "Platelet engraftment at 6-month post-transplant for subgroups") 
+
+label(pre_LIC_platelet$platelet_engraftment_day_censored) = "Time to platelet engraftment (days)"
+table1(~platelet_engraftment_day_censored|LIC_level_1_binary, 
+        data = pre_LIC_platelet %>% filter(platelet_engraftment_censored ==1), 
+        caption =  "Platelet engraftment at 6-month post-transplant for subgroups")      
+```
+
+- Competing risk analysis adjusted for: 
+  - pre-transplant most recent ferritin levels: low(<1000 ng/mL), moderate (1000-2500 ng/mL), or high (>=2500 ng/mL)
+  - age at transplant: continuous 
+  - gender: female (ref) or male
+  - has busulfan: yes or no
+  - Outcomes: platelet engraftment within 180 days. 
+  - Competing risks: death & graft failure
+- Site is included as a covariate. Please intepret the results with cautions due to the samll counts at some sites. 
+
+```{r platelet_engraft_pre_LIC, echo= FALSE, message=FALSE, fig.width = 9, fig.height = 6}
+# 0 is censored/survived, 1 is death
+pre_LIC_platelet_2 <- pre_LIC_platelet %>% 
+                          mutate(platelet_engraftment_censored = recode(platelet_engraftment_censored, "0" = "event-free", "1" = "platelet engraftment", "2" = "death/graft failure")) %>% 
+                          mutate(platelet_engraftment_censored = factor(platelet_engraftment_censored,
+                                                  levels = c("event-free", "platelet engraftment", "death/graft failure"))) #%>%
+                          # mutate(site = relevel(as.factor(site), ref = "chop"))
+
+compRisk_LIC_platelet <- coxph(Surv(platelet_engraftment_day_censored, platelet_engraftment_censored) ~ LIC_level_1_binary + age_at_ce + gender + has_busulfan +site, 
+                data = pre_LIC_platelet_2 %>%
+                        filter(site != "site_8"), 
+                id = record_id)
+```
+
+- In the table below: 1:2 represents transition to engraftment and 1:3 represents transition to death/graft failure without engraftment within 60 days post-transplant
+```{r platelet_engraft_pre_LIC_sum, echo= FALSE, message=FALSE}
+res <- cox_sum(compRisk_LIC_platelet) 
+res$covariates = rownames(res)
+rownames(res) = NULL
+res %>% filter(grepl("_1:2", covariates)) %>%
+  select(covariates, HR, `95 CI`, p_val) %>%
+  prettify_kable()
+```
+
+```{r platelet_engraft_pre_LIC_plot}
+
+# Prepare transition matrix
+tmat <- trans.comprisk(2, names = c("event-free", "platelet engraftment", "death/graft failure"))
+
+# Run msprep
+pre_LIC_platelet_2$platelet_engraft <- as.numeric(pre_LIC_platelet_2$platelet_engraftment_censored == "platelet engraftment")
+pre_LIC_platelet_2$comp_risk <- as.numeric(pre_LIC_platelet_2$platelet_engraftment_censored == "death/graft failure")
+
+pre_LIC_platelet_2_long <- msprep(
+  time = c(NA, "platelet_engraftment_day_censored", "platelet_engraftment_day_censored"), 
+  status = c(NA, "platelet_engraft", "comp_risk"), 
+  data = pre_LIC_platelet_2, 
+  keep = c("has_busulfan","age_at_ce", "gender", "LIC_level_1_binary"), 
+  trans = tmat)
+
+pre_LIC_platelet_2_expanded <- expand.covs(pre_LIC_platelet_2_long, "LIC_level_1_binary")
+
+LIC_cp <- coxph(Surv(time, status) ~ 
+                                  LIC_level_1_binaryhigh.1 + LIC_level_1_binaryhigh.2 + 
+                                  gender + 
+                                  age_at_ce + gender + has_busulfan  + 
+                                  strata(trans),
+            data = pre_LIC_platelet_2_expanded)
+
+# Visualising cumulative baseline hazards using plot.msfit()
+# Data to predict
+# in this expanded dataset ferritin_premoderate.1 means "transition 1": event-free to graft-failure 
+
+f_low_moderate <- data.frame(
+  LIC_level_1_binaryhigh.1 = c(0, 0),
+  LIC_level_1_binaryhigh.2 = c(0, 0),
+  age_at_ce = c(10, 10), 
+  gender = c("Female", "Female"),
+  has_busulfan = c("No", "No"),  
+  trans = c(1, 2), 
+  strata = c(1, 2)
+)
+
+f_high <- data.frame(
+  LIC_level_1_binaryhigh.1 = c(1, 0),
+  LIC_level_1_binaryhigh.2 = c(0, 1),
+  age_at_ce = c(10, 10), 
+  gender = c("Female", "Female"),
+  has_busulfan = c("No", "No"),  
+  trans = c(1, 2), 
+  strata = c(1, 2)
+)
+
+# Make msfit object for each ferritin level
+msf.f_low_moderate <- msfit(object = LIC_cp, newdata = f_low_moderate, trans = tmat)
+# msf.f_moderate <- msfit(object = ferritin_cp, newdata = f_moderate, trans = tmat)
+msf.f_high <- msfit(object = LIC_cp, newdata = f_high, trans = tmat)
+
+# Make probtrans objects for each ferritin level
+pt.f_low_moderate <- probtrans(msf.f_low_moderate, predt = 0)
+# pt.f_moderate <- probtrans(msf.f_moderate, predt = 0)
+pt.f_high <- probtrans(msf.f_high, predt = 0)
+# if just plotting a single level, replace the c() dataset with a single one_of()
+# or call plot() instead of vis.multiple.pt()
+
+vis.multiple.pt(
+  x = list(pt.f_low_moderate, pt.f_high), 
+  from = 1,
+  to = 2, 
+  conf.type = "none",
+  # cols = c(1, 2, 3),
+  cols = c("blue", "green"), #  something is wrong with this argument
+  labels = c("Low-moderate", "High"),
+  legend.title = "Pre-transplant LIC",
+  ylab = "Probability of platelet engraftment",
+  xlab = "Days post-transplant",
+  xlim = c(0, 180), 
+  ylim = c(0, .5)) +
+  labs(title = "Platelet engraftment") +
+  theme(plot.title = element_text(size = plot_title_text_size),    # Title text size
+    axis.title.x = element_text(size = axis_text_size), # X-axis title size
+    axis.title.y = element_text(size = axis_text_size), # Y-axis title size
+    axis.text.x = element_text(size = axis_text_size),  # X-axis labels size
+    axis.text.y = element_text(size = axis_text_size),   # Y-axis labels size
+    legend.title = element_text(size = axis_text_size),    # Legend title size
+    legend.text = element_text(size = axis_text_size)) 
+```
+
+# Neutrophil engraftment
+## Aim 2a-2: Neutrophil engraftment stratified by <span style="color:red">pre-transplant ferritin levels</span>
+```{r anc_engraft_pre_ferritin_data, echo= FALSE, message=FALSE}
+# unknown_ct <- pre_ferritin_cox %>% filter(!is.na(graft_fail_days_since_ce_5yr_censored)) %>% filter(transplant_type_combined == "Unknown") %>% nrow()
+pre_ferritin_anc <- pre_ferritin_cox %>%
+                        filter(!is.na(anc_engraftment_censored))
+label(pre_ferritin_anc$transplant_type_combined) = "match status"
+label(pre_ferritin_anc$survival_5yr) = "Dies within 5 years of post-transplant"
+
+table1(~gender + age_at_ce + transplant_type_combined + 
+        ferritin_pre + has_busulfan + scd_type + anc_engraftment_day_censored + 
+        site | anc_engraftment_censored, 
+        data = pre_ferritin_anc %>%
+                        mutate(anc_engraftment_censored = ifelse(anc_engraftment_censored ==1, "ANC Engraftment w/in 60 days", "Never engrafted/death/graft failure")), 
+        overall = FALSE, 
+        caption = "Neutrophil engraftment at 6-month post-transplant")      
+
+table1(~ferritin_pre| anc_engraftment_censored + scd_type, 
+        data = pre_ferritin_anc %>%
+                        mutate(anc_engraftment_censored = ifelse(anc_engraftment_censored ==1, "ANC Engraftment w/in 60 days", "Never engrafted/death/graft failure")), 
+        overall = FALSE, 
+        caption =  "Neutrophil engraftment at 6-month post-transplant for subgroups") 
+label(pre_ferritin_anc$anc_engraftment_day_censored) = "Time to neutrophil engraftment (days)"
+table1(~anc_engraftment_day_censored|ferritin_pre, 
+        data = pre_ferritin_anc %>% filter(anc_engraftment_censored ==1), 
+        caption =  "Neutrophil engraftment at 6-month post-transplant for subgroups")      
+```
+
+- Competing risk analysis adjusted for: 
+  - pre-transplant most recent ferritin levels: low(<1000 ng/mL), moderate (1000-2500 ng/mL), or high (>=2500 ng/mL)
+  - age at transplant: continuous 
+  - gender: female (ref) or male
+  - has busulfan: yes or no
+  - Outcomes: neutrophil engraftment within 180 days. 
+  - Competing risks: death & graft failure
+
+- Site is included as a covariate. Please intepret the results with cautions due to the small counts at some sites. 
+```{r anc_engraft_pre_ferritin, echo= FALSE, message=FALSE, fig.width = 9, fig.height = 6}
+# 0 is censored/survived, 1 is death
+
+pre_ferritin_anc_2 <- pre_ferritin_anc %>% 
+                          mutate(anc_engraftment_censored = recode(anc_engraftment_censored, "0" = "event-free", "1" = "anc engraftment", "2" = "death/graft failure")) %>% 
+                          mutate(anc_engraftment_censored = factor(anc_engraftment_censored,
+                                                  levels = c("event-free", "anc engraftment", "death/graft failure"))) #%>%
+                          # mutate(site = relevel(as.factor(site), ref = "chop"))
+
+compRisk_ferritin_anc <- coxph(Surv(anc_engraftment_day_censored, anc_engraftment_censored) ~ ferritin_pre + age_at_ce + gender + has_busulfan + site, 
+                data = pre_ferritin_anc_2, 
+                id = record_id)
+```
+
+- In the table below: 1:2 represents transition to engraftment and 1:3 represents transition to death/graft failure without engraftment within 60 days post-transplant
+```{r anc_engraft_pre_ferritin_sum, echo= FALSE, message=FALSE}
+res <- cox_sum(compRisk_ferritin_anc) 
+res$covariates = rownames(res)
+rownames(res) = NULL
+res %>% filter(grepl("_1:2", covariates)) %>%
+  select(covariates, HR, `95 CI`, p_val) %>%
+  prettify_kable()
+```
+```{r anc_engraft_pre_ferritin_plot}
+
+# Prepare transition matrix
+tmat <- trans.comprisk(2, names = c("event-free", "anc engraftment", "death/graft failure"))
+
+# Run msprep
+pre_ferritin_anc_2$anc_engraft <- as.numeric(pre_ferritin_anc_2$anc_engraftment_censored == "anc engraftment")
+pre_ferritin_anc_2$comp_risk <- as.numeric(pre_ferritin_anc_2$anc_engraftment_censored == "death/graft failure")
+
+# convert to long data format
+# the status variable is just a numeric representation of graft_fail_5yr 
+# If there are K competing events, each individual needs K rows in the new data file, one for each
+# possible cause of failure. A column (cause in the example) is used to denote the event type or
+# failure cause that the row refers to.
+# The advantage of long format is that we can simultaneously model all the 1:2 and 1:3 transitions
+# instead of separating them in wide format data
+
+pre_ferritin_anc_2_long <- msprep(
+  time = c(NA, "anc_engraftment_day_censored", "anc_engraftment_day_censored"), 
+  status = c(NA, "anc_engraft", "comp_risk"), 
+  data = pre_ferritin_anc_2, 
+  keep = c("has_busulfan","age_at_ce", "gender", "ferritin_pre"), 
+  trans = tmat)
+
+# expand the dataset to include type-specific covariates (if any)
+# extra dummy variables ferritin_premoderate.1 + ferritin_prehigh.2 .. were added 
+# They have the value 0 except for the ferritin levels and the transitions that they correspond to (i.e. for a # patient with moderate ferritin ferritin_premoderate.1=1 for the first cause, ‘graft-failure’, 
+# ferritin_premoderate.2=1 for the second cause, 'death without graft failure'. They
+# are what Andersen et al call type-specific covariates.
+pre_ferritin_anc_2_expanded <- expand.covs(pre_ferritin_anc_2_long, "ferritin_pre")
+
+# colnames(pre_ferritin_cox_2_expanded)
+
+# pre_ferritin_cox_2_expanded %>% view()
+
+# there are many ways of doing this
+# i. having ferritin_pre on the right handside
+# ii. having the expanded terms: ferritin_premoderate.1 + ferritin_prehigh.2 etc on the right handside
+# iii. including strata(trans) to allow for different baseline hazard functions across the levels of the trans variable. This is particularly useful in multi-state models where the hazard of transitioning from one state to another may differ significantly across transitions
+# iv. adding a covariate by cause interactions ccr5 * factor(trans)
+# check out all of these senarios: if the interactions is significant, maybe we dont want to remove it
+
+ferritin_cp <- coxph(Surv(time, status) ~ 
+                                  ferritin_prehigh.1 + ferritin_prehigh.2 + 
+                                  gender + 
+                                  age_at_ce + gender + has_busulfan  + 
+                                  strata(trans),
+            data = pre_ferritin_anc_2_expanded)
+
+# Visualising cumulative baseline hazards using plot.msfit()
+# Data to predict
+# in this expanded dataset ferritin_premoderate.1 means "transition 1": event-free to graft-failure 
+
+f_low_moderate <- data.frame(
+  # ferritin_pre = c("low", "low"),
+  # ferritin_premoderate.1 = c(0, 0),
+  # ferritin_premoderate.2 = c(0, 0),
+  ferritin_prehigh.1 = c(0, 0),
+  ferritin_prehigh.2 = c(0, 0),
+  age_at_ce = c(10, 10), 
+  gender = c("Female", "Female"),
+  has_busulfan = c("No", "No"),  
+  trans = c(1, 2), 
+  strata = c(1, 2)
+)
+
+f_high <- data.frame(
+  # ferritin_pre = c("high", "high"),
+  # ferritin_premoderate.1 = c(0, 0),
+  # ferritin_premoderate.2 = c(0, 0),
+  ferritin_prehigh.1 = c(1, 0),
+  ferritin_prehigh.2 = c(0, 1),
+  age_at_ce = c(10, 10), 
+  gender = c("Female", "Female"),
+  has_busulfan = c("No", "No"),  
+  trans = c(1, 2), 
+  strata = c(1, 2)
+)
+
+# Make msfit object for each ferritin level
+msf.f_low_moderate <- msfit(object = ferritin_cp, newdata = f_low_moderate, trans = tmat)
+# msf.f_moderate <- msfit(object = ferritin_cp, newdata = f_moderate, trans = tmat)
+msf.f_high <- msfit(object = ferritin_cp, newdata = f_high, trans = tmat)
+
+# Make probtrans objects for each ferritin level
+pt.f_low_moderate <- probtrans(msf.f_low_moderate, predt = 0)
+# pt.f_moderate <- probtrans(msf.f_moderate, predt = 0)
+pt.f_high <- probtrans(msf.f_high, predt = 0)
+# if just plotting a single level, replace the c() dataset with a single one_of()
+# or call plot() instead of vis.multiple.pt()
+
+vis.multiple.pt(
+  x = list(pt.f_low_moderate, pt.f_high), 
+  from = 1,
+  to = 2, 
+  conf.type = "none",
+  # cols = c(1, 2, 3),
+  cols = c("blue", "green"), #  something is wrong with this argument
+  labels = c("Low-moderate", "High"),
+  legend.title = "Pre-transplant ferritin",
+  ylab = "Probability of neutrophil engraftment",
+  xlab = "Days post-transplant",
+  xlim = c(0, 180), 
+  ylim = c(0, 1)) +
+  labs(title = "Neutrophil engraftment") +
+  theme(plot.title = element_text(size = plot_title_text_size),    # Title text size
+    axis.title.x = element_text(size = axis_text_size), # X-axis title size
+    axis.title.y = element_text(size = axis_text_size), # Y-axis title size
+    axis.text.x = element_text(size = axis_text_size),  # X-axis labels size
+    axis.text.y = element_text(size = axis_text_size),   # Y-axis labels size
+    legend.title = element_text(size = axis_text_size),    # Legend title size
+    legend.text = element_text(size = axis_text_size)) 
 ```
 
 
-# Sensitivity analysis
-## Overall survival: Subgroup analysis for pre-transplant LIC binary classification
-### sickle cell disease --- Overall survival: Subgroup analysis for pre-transplant LIC binary levels
+## Neutrophil engraftment stratified by <span style="color:red">pre-transplant LIC levels</span>
+- Again no engraftment information from site_8. 
+```{r anc_engraft_pre_LIC_data, echo= FALSE, message=FALSE}
+# unknown_ct <- pre_ferritin_cox %>% filter(!is.na(graft_fail_days_since_ce_5yr_censored)) %>% filter(transplant_type_combined == "Unknown") %>% nrow()
+pre_LIC_anc <- pre_LIC_cox %>% 
+                        filter(!is.na(anc_engraftment_censored)) #%>%
+                        # site_mask() %>%
+                        # mutate(site = relevel(as.factor(site), ref = "site_1"))
 
-- In this subgroup analysis: I have to remove the transplant type from the list of covariates. 
-- The LIC cut-off for high vs. low is 8
+label(pre_LIC_anc$transplant_type_combined) = "match status"
+label(pre_LIC_anc$survival_5yr) = "Dies within 5 years of post-transplant"
 
-```{r pre_LIC_binary_OS_disease_subgroup_scd}
-table1(~age_at_ce + gender + transplant_type_combined + LIC_level_1_binary + has_busulfan| survival_5yr, 
-        data = pre_LIC_cox %>% mutate(survival_5yr = ifelse(survival_5yr ==1, "Dead", "Survived")) %>%
-                filter(scd_type == "sickle cell disease"), 
+table1(~gender + age_at_ce + transplant_type_combined + 
+        LIC_level_1_binary + has_busulfan + scd_type + anc_engraftment_day_censored + 
+        site | anc_engraftment_censored, 
+        data = pre_LIC_anc %>%
+                        mutate(anc_engraftment_censored = ifelse(anc_engraftment_censored ==1, "Neutrophil Engraftment w/in 60 days", "Never engrafted/death/graft failure")), 
         overall = FALSE, 
-        caption = "Overall survival at 5-yr following transplant --- sickle cell disease")     
+        caption = "Platelet engraftment at 6-month post-transplant")      
 
-pre_LIC_os_scd <- pre_LIC_cox %>%
-    # filter(!(transplant_type_combined %in% c("mismatched related", "mismatched unrelated", "autologous/genetherapy"))) %>%
-    cox_fit_plot(time_var = "survival_time_5yr_censored", 
-                status_var = "survival_5yr", 
-                covariates = c("LIC_level_1_binary", "age_at_ce", "gender", "has_busulfan"),
-                iron_level_var = "LIC_level_1_binary", 
-                plot_labels = c("Pre-transplant LIC binary levels", "Overall survival probability"),
-                sub_group = "sickle cell disease")
+table1(~LIC_level_1_binary| anc_engraftment_censored + scd_type, 
+        data = pre_LIC_anc %>%
+                        mutate(anc_engraftment_censored = ifelse(anc_engraftment_censored ==1, "ANC Engraftment w/in 60 days", "Never engrafted/death/graft failure")), 
+        overall = FALSE, 
+        caption =  "Neutrophil engraftment at 6-month post-transplant for subgroups") 
 
-print(pre_LIC_os_scd$p)
-cox_sum(pre_LIC_os_scd$fit) %>% prettify_kable()
+label(pre_LIC_anc$anc_engraftment_day_censored) = "Time to ANC engraftment (days)"
+table1(~anc_engraftment_day_censored|LIC_level_1_binary, 
+        data = pre_LIC_anc %>% filter(anc_engraftment_censored ==1), 
+        caption =  "Neutrohil engraftment at 6-month post-transplant for subgroups")      
 ```
 
-### aplastic anemia --- Overall survival: Subgroup analysis for pre-transplant LIC binary levels
+- Competing risk analysis adjusted for: 
+  - pre-transplant most recent ferritin levels: low(<1000 ng/mL), moderate (1000-2500 ng/mL), or high (>=2500 ng/mL)
+  - age at transplant: continuous 
+  - gender: female (ref) or male
+  - has busulfan: yes or no
+  - Outcomes: neutrophil engraftment within 180 days. 
+  - Competing risks: death & graft failure
+- Site is included as a covariate. Please intepret the results with cautions due to the small counts at some sites. 
 
-- In this subgroup analysis: I have to remove the transplant type from the list of covariates. 
+```{r anc_engraft_pre_LIC, echo= FALSE, message=FALSE, fig.width = 9, fig.height = 6}
+# 0 is censored/survived, 1 is death
 
-```{r pre_LIC_binary_OS_disease_subgroup_aa}
-table1(~age_at_ce + gender + transplant_type_combined + LIC_level_1_binary + has_busulfan| survival_5yr, 
-        data = pre_LIC_cox %>% mutate(survival_5yr = ifelse(survival_5yr ==1, "Dead", "Survived")) %>%
-                filter(scd_type == "aplastic anemia"), 
-        overall = FALSE, 
-        caption = "Overall survival at 5-yr following transplant --- aplastic anemia")     
+pre_LIC_anc_2 <- pre_LIC_anc %>% 
+                          mutate(anc_engraftment_censored = recode(anc_engraftment_censored, "0" = "event-free", "1" = "anc engraftment", "2" = "death/graft failure")) %>% 
+                          mutate(anc_engraftment_censored = factor(anc_engraftment_censored,
+                                                  levels = c("event-free", "anc engraftment", "death/graft failure"))) #%>%
+                          # mutate(site = relevel(as.factor(site), ref = "chop"))
 
-pre_LIC_os_aa <- pre_LIC_cox %>%
-    # filter((transplant_type_combined == "matched unrelated/mismatched unrelated/mismatched related")) %>% distinct(transplant_type_combined)
-    cox_fit_plot(time_var = "survival_time_5yr_censored", 
-                status_var = "survival_5yr", 
-                covariates = c("LIC_level_1_binary", "age_at_ce", "gender", "has_busulfan"),
-                iron_level_var = "LIC_level_1_binary", 
-                plot_labels = c("Pre-transplant LIC binary levels", "Overall survival probability"),
-                sub_group = "aplastic anemia")
-
-print(pre_LIC_os_aa$p)
-cox_sum(pre_LIC_os_aa$fit) %>% prettify_kable()
+compRisk_LIC_anc <- coxph(Surv(anc_engraftment_day_censored, anc_engraftment_censored) ~ LIC_level_1_binary + age_at_ce + gender + site + has_busulfan, 
+                data = pre_LIC_anc_2 %>%
+                        filter(site != "site_8"), 
+                id = record_id)
 ```
 
-### beta thalassemia major  --- Overall survival: Subgroup analysis for pre-transplant LIC binary levels
-
-```{r pre_LIC_binary_OS_disease_subgroup_btm}
-table1(~age_at_ce + gender + transplant_type_combined + LIC_level_1_binary + has_busulfan| survival_5yr, 
-        data = pre_LIC_cox %>% mutate(survival_5yr = ifelse(survival_5yr ==1, "Dead", "Survived")) %>%
-                filter(scd_type == "beta thalassemia major"), 
-        overall = FALSE, 
-        caption = "Overall survival at 5-yr following transplant --- beta thalassemia major")     
-
-pre_LIC_os_btm <- pre_LIC_cox %>%
-    filter(!(transplant_type_combined %in% c("autologous/genetherapy"))) %>%
-    cox_fit_plot(time_var = "survival_time_5yr_censored", 
-                status_var = "survival_5yr", 
-                covariates = c("LIC_level_1_binary", "age_at_ce", "gender", "has_busulfan", "transplant_type_combined"),
-                iron_level_var = "LIC_level_1_binary", 
-                plot_labels = c("Pre-transplant LIC binary levels", "Overall survival probability"),
-                sub_group = "beta thalassemia major")
-
-print(pre_LIC_os_btm$p)
-cox_sum(pre_LIC_os_btm$fit) %>% prettify_kable()
+- In the table below: 1:2 represents transition to engraftment and 1:3 represents transition to death/graft failure without engraftment within 60 days post-transplant
+```{r anc_engraft_pre_LIC_sum, echo= FALSE, message=FALSE}
+res <- cox_sum(compRisk_LIC_anc) 
+res$covariates = rownames(res)
+rownames(res) = NULL
+res %>% filter(grepl("_1:2", covariates)) %>%
+  select(covariates, HR, `95 CI`, p_val) %>%
+  prettify_kable()
 ```
 
-## Overall survival: Subgroup analysis for pre-transplant ferritin levels
-### aplastic anemia  --- Overall survival: Subgroup analysis for pre-transplant ferritin levels
-```{r pre_ferritin_OS_disease_subgroup_aa}
-table1(~age_at_ce + gender + transplant_type_combined + ferritin_pre + has_busulfan| survival_5yr, 
-        data = pre_ferritin_cox %>% mutate(survival_5yr = ifelse(survival_5yr ==1, "Dead", "Survived")) %>%
-                filter(scd_type == "aplastic anemia"), 
-        overall = FALSE, 
-        caption = "Overall survival at 5-yr following transplant --- aplastic anemia")                          
+```{r anc_engraft_pre_LIC_plot}
 
-pre_ferritin_os_aa <- pre_ferritin_cox %>%
-    filter(!(transplant_type_combined %in% c("Unknown", "autologous/genetherapy"))) %>%
-    cox_fit_plot(time_var = "survival_time_5yr_censored", 
-                status_var = "survival_5yr", 
-                covariates = c("ferritin_pre", "age_at_ce", "gender", "transplant_type_combined", "has_busulfan"),
-                iron_level_var = "ferritin_pre", 
-                plot_labels = c("Pre-transplant ferritin levels", "Overall survival probability"),
-                sub_group = "aplastic anemia")
-print(pre_ferritin_os_aa$p)
-cox_sum(pre_ferritin_os_aa$fit) %>% prettify_kable()
-```
+# Prepare transition matrix
+tmat <- trans.comprisk(2, names = c("event-free", "anc engraftment", "death/graft failure"))
 
-### sickle cell disease  --- Overall survival: Subgroup analysis for pre-transplant ferritin levels
-```{r pre_ferritin_OS_disease_subgroup_scd}
-table1(~age_at_ce + gender + transplant_type_combined + ferritin_pre + has_busulfan| survival_5yr, 
-        data = pre_ferritin_cox %>% mutate(survival_5yr = ifelse(survival_5yr ==1, "Dead", "Survived")) %>%
-                filter(scd_type == "sickle cell disease"), 
-        overall = FALSE, 
-        caption = "Overall survival at 5-yr following transplant --- sickle cell disease")                          
+# Run msprep
+pre_LIC_anc_2$anc_engraft <- as.numeric(pre_LIC_anc_2$anc_engraftment_censored == "anc engraftment")
+pre_LIC_anc_2$comp_risk <- as.numeric(pre_LIC_anc_2$anc_engraftment_censored == "death/graft failure")
 
-pre_ferritin_os_scd <- pre_ferritin_cox %>%
-    filter((transplant_type_combined %in% c("matched related", "matched unrelated/mismatched unrelated/mismatched related"))) %>%
-    cox_fit_plot(time_var = "survival_time_5yr_censored", 
-                status_var = "survival_5yr", 
-                covariates = c("ferritin_pre", "age_at_ce", "gender", "has_busulfan","transplant_type_combined"),
-                iron_level_var = "ferritin_pre", 
-                plot_labels = c("Pre-transplant ferritin levels", "Overall survival probability"),
-                sub_group = "sickle cell disease")
+pre_LIC_anc_2_long <- msprep(
+  time = c(NA, "anc_engraftment_day_censored", "anc_engraftment_day_censored"), 
+  status = c(NA, "anc_engraft", "comp_risk"), 
+  data = pre_LIC_anc_2 %>%
+                        filter(site != "site_8"), 
+  keep = c("has_busulfan","age_at_ce", "gender", "LIC_level_1_binary", "site"), 
+  trans = tmat)
 
-print(pre_ferritin_os_scd$p)
-cox_sum(pre_ferritin_os_scd$fit) %>% prettify_kable()
-```
+pre_LIC_anc_2_expanded <- expand.covs(pre_LIC_anc_2_long, "LIC_level_1_binary")
 
-### beta thalassemia major  --- Overall survival: Subgroup analysis for pre-transplant ferritin levels
-```{r pre_ferritin_OS_disease_subgroup_btm}
-table1(~age_at_ce + gender + transplant_type_combined + ferritin_pre + has_busulfan| survival_5yr, 
-        data = pre_ferritin_cox %>% mutate(survival_5yr = ifelse(survival_5yr ==1, "Dead", "Survived")) %>%
-                filter(scd_type == "beta thalassemia major"), 
-        overall = FALSE, 
-        caption = "Overall survival at 5-yr following transplant --- beta thalassemia major")     
+LIC_cp <- coxph(Surv(time, status) ~ 
+                LIC_level_1_binaryhigh.1 + LIC_level_1_binaryhigh.2 + 
+                gender + 
+                age_at_ce + gender + has_busulfan  + 
+                strata(trans),
+            data = pre_LIC_anc_2_expanded)
 
-pre_ferritin_os_btm <- pre_ferritin_cox %>%
-    filter(!(transplant_type_combined %in% c("autologous/genetherapy"))) %>%
-    cox_fit_plot(time_var = "survival_time_5yr_censored", 
-                status_var = "survival_5yr", 
-                covariates = c("ferritin_pre", "age_at_ce", "gender", "has_busulfan", "transplant_type_combined"),
-                iron_level_var = "ferritin_pre", 
-                plot_labels = c("Pre-transplant ferritin levels", "Overall survival probability"),
-                sub_group = "beta thalassemia major")
+# Visualising cumulative baseline hazards using plot.msfit()
+# Data to predict
+# in this expanded dataset ferritin_premoderate.1 means "transition 1": event-free to graft-failure 
 
-print(pre_ferritin_os_btm$p)
-cox_sum(pre_ferritin_os_btm$fit) %>% prettify_kable()
+f_low_moderate <- data.frame(
+  LIC_level_1_binaryhigh.1 = c(0, 0),
+  LIC_level_1_binaryhigh.2 = c(0, 0),
+  age_at_ce = c(10, 10), 
+  gender = c("Female", "Female"),
+  has_busulfan = c("No", "No"),  
+  trans = c(1, 2), 
+  strata = c(1, 2)
+)
 
-# pre_ferritin_cox_1 %>% filter(scd_type == "sickle cell disease") %>%
-#       group_by(transplant_type_combined, survival_5yr) %>% summarise(n = n_distinct(record_id))
+f_high <- data.frame(
+  LIC_level_1_binaryhigh.1 = c(1, 0),
+  LIC_level_1_binaryhigh.2 = c(0, 1),
+  age_at_ce = c(10, 10), 
+  gender = c("Female", "Female"),
+  has_busulfan = c("No", "No"),  
+  trans = c(1, 2), 
+  strata = c(1, 2)
+)
+
+# Make msfit object for each ferritin level
+msf.f_low_moderate <- msfit(object = LIC_cp, newdata = f_low_moderate, trans = tmat)
+# msf.f_moderate <- msfit(object = ferritin_cp, newdata = f_moderate, trans = tmat)
+msf.f_high <- msfit(object = LIC_cp, newdata = f_high, trans = tmat)
+
+# Make probtrans objects for each ferritin level
+pt.f_low_moderate <- probtrans(msf.f_low_moderate, predt = 0)
+# pt.f_moderate <- probtrans(msf.f_moderate, predt = 0)
+pt.f_high <- probtrans(msf.f_high, predt = 0)
+# if just plotting a single level, replace the c() dataset with a single one_of()
+# or call plot() instead of vis.multiple.pt()
+
+vis.multiple.pt(
+  x = list(pt.f_low_moderate, pt.f_high), 
+  from = 1,
+  to = 2, 
+  conf.type = "none",
+  # cols = c(1, 2, 3),
+  cols = c("blue", "green"), #  something is wrong with this argument
+  labels = c("Low-moderate", "High"),
+  legend.title = "Pre-transplant LIC",
+  ylab = "Probability of neutrophil engraftment",
+  xlab = "Days post-transplant",
+  xlim = c(0, 180), 
+  ylim = c(0, 1)) +
+  labs(title = "Neutrophil engraftment") +
+  theme(plot.title = element_text(size = plot_title_text_size),    # Title text size
+    axis.title.x = element_text(size = axis_text_size), # X-axis title size
+    axis.title.y = element_text(size = axis_text_size), # Y-axis title size
+    axis.text.x = element_text(size = axis_text_size),  # X-axis labels size
+    axis.text.y = element_text(size = axis_text_size),   # Y-axis labels size
+    legend.title = element_text(size = axis_text_size),    # Legend title size
+    legend.text = element_text(size = axis_text_size)) 
 ```

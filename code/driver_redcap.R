@@ -50,7 +50,11 @@
 
     # to check for a specific value
     cr_data %>% filter(eligibility == "Yes", !is.na(LIC_date), LIC_est_method == "T2*", site == "stanford", is.na(LIC_other_unit)) %>% view()
-    
+    cr_data %>% filter(eligibility == "Yes", !is.na(LIC_date), 
+                        LIC_est_method == "R2*" | LIC_est_method == "R2", 
+                        site == "lurie", is.na(LIC_other_unit)) %>% 
+                arrange(record_id, LIC_date) %>% view()
+
     cr_data <- cr_data %>% mutate(is_ms = case_when(grepl("milliseconds", LIC_other_unit, ignore.case = TRUE) ~ TRUE, 
                                         grepl("ms", LIC_other_unit, ignore.case = TRUE) ~ TRUE, 
                                         is.na(LIC_other_unit) ~ NA,
@@ -97,18 +101,21 @@
     lurie %>% select(record_id, LIC_date, LIC_raw, LIC_est_method, is_ms, is_Hz, LIC, LIC_type, LIC_other_unit)  %>%
                 arrange(record_id, LIC_date) %>% output_tbl(name = "lurie_LIC_data", file = TRUE, local = TRUE)
 
-    # for dates with multiple LIC values, we will use the R2 values, aka exclude R2* values
-    # for dates with multiple R2 values, we will use average values            
+    # Previously: for dates with multiple LIC values, we will use the R2 values, aka exclude R2* values
+    # for dates with multiple R2 values, we will use average values     
+    # Correction: for dates with R2* and R2 values,exclude R2 values and only use R2* values
     lurie_multi_per_day <- lurie %>% group_by(record_id, LIC_date) %>% 
-                summarise(n = n()) %>% ungroup() %>% filter(n >= 2) %>% 
+                summarise(n = n(), n_methos = n_distinct(LIC_est_method)) %>% ungroup() %>%
+                filter(n_methos > 1) %>%            
+                filter(n >= 2) %>% 
                 left_join(lurie, by = c("record_id", "LIC_date")) %>% 
-                filter(LIC_est_method == "R2*") #%>% 
+                filter(LIC_est_method == "R2") #%>% 
                 # group_by(record_id, LIC_date, LIC_est_method ) %>% 
                 # summarise(LIC = mean(LIC, na.rm = TRUE)) %>% ungroup() 
-    lurie <- lurie %>% anti_join(lurie_multi_per_day, by = c("record_id", "LIC_date", "LIC_est_method"))        
+#     lurie <- lurie %>% anti_join(lurie_multi_per_day, by = c("record_id", "LIC_date", "LIC_est_method"))        
 
-     cr_data <- cr_data %>% anti_join(lurie, by = c("record_id", "LIC_date")) %>%
-                union(lurie)
+     cr_data <- cr_data %>% anti_join(lurie_multi_per_day, by = c("record_id", "LIC_date")) #%>%
+                # union(lurie)
 
     # write cr data to a table
     # patients with match status that were not included in the study

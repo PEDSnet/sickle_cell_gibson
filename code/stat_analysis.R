@@ -85,10 +85,15 @@ cohort_covars <- cohort_covars %>% #mutate(ferritin_pre = factor(ferritin_pre, l
   mutate(bacteremia_1yr = case_when(is.na(bacteremia_days_since_ce) & bacteremia_time_1yr_censored < 365.25 ~ 0, 
                                 bacteremia_time_1yr_censored >= 0 & bacteremia_time_1yr_censored < 365.25 & !is.na(bacteremia_days_since_ce)~ 1, 
                                 bacteremia_time_1yr_censored >= (365.25) ~0)) %>%
+  mutate(bacteremia_time_6mon_censored = case_when(bacteremia_days_since_ce > 183 ~ 183, 
+                                                  bacteremia_days_since_ce >= 0 & bacteremia_days_since_ce <= 183 ~ bacteremia_days_since_ce,death_days_since_ce <= 183 ~ death_days_since_ce, #if die before 5 years, mark as censored 
+                                                  is.na(bacteremia_days_since_ce) & !is.na(last_in_person_visit_since_ce) ~ pmin(last_in_person_visit_since_ce, 183, na.rm = TRUE),
+                                               TRUE ~ NA_real_)) %>%
+  mutate(bacteremia_6mon = case_when(is.na(bacteremia_days_since_ce) & bacteremia_time_6mon_censored < 183 ~ 0, 
+                                bacteremia_time_6mon_censored >= 0 & bacteremia_time_1yr_censored < 183 & !is.na(bacteremia_days_since_ce)~ 1, 
+                                bacteremia_time_6mon_censored >= (183) ~0)) %>%
   mutate(graft_manip = if_else(is.na(graft_manip), "Unknown", graft_manip)) %>%
   mutate(disease_relapse = if_else(is.na(graft_fail_date), "No", "Yes")) 
-
-cohort_covars %>% output_tbl("survival_analysis_dataset")
 
 # results_tbl("cr_data") %>% collect() %>% output_tbl("cr_data", local = TRUE, file = TRUE)
                               
@@ -226,191 +231,60 @@ cohort_covars %>% output_tbl("survival_analysis_dataset")
 #             mutate(duration = end_date - start_date) %>% view()
 
 
-# graft failure competing risk model
-pre_ferritin_cox_2 <- pre_ferritin_cox %>% 
-                          filter(transplant_type_combined != "Unknown") %>% 
-                          # filter(transplant_type_combined != "autologous/genetherapy") %>% 
-                          filter(!is.na(graft_fail_5yr)) %>% 
-                          # mutate(graft_fail_5yr = recode(graft_fail_5yr, "0" = "event-free", "1" = "graft failure", "2" = "death")) %>%
-                          # mutate(graft_fail_5yr = factor(graft_fail_5yr,
-                                                  # levels = c("event-free", "graft failure", "death"))) %>% 
-                          filter(graft_fail_days_since_ce_5yr_censored >= 0) %>%
-                          mutate(transplant_type_combined = relevel(factor(transplant_type_combined), ref = "matched related"))
+# Neutrophil engraftment date:
+anc_engraftment <- read.csv("results/ANC_reviews_Nora.csv")
+anc_time_cutoff <- 180 #days
+cohort_covars <- cohort_covars %>% left_join(anc_engraftment %>% 
+                                select(record_id, anc_engraftment_day = engraftment_day), by = "record_id") %>% 
+                  # filter(!is.na(anc_engraftment_day)) %>% #filter out the non-eligible cases
+                  # censored the cases that did not engraft within 60 days
+                  # mutate(anc_engraftment_day = if_else(anc_engraftment_day < 0, 60, anc_engraftment_day)) %>%
+                  # check for graft failure and death as competing risk 
+                  mutate(anc_engraftment_censored = case_when(anc_engraftment_day < 0 & (graft_fail_days_since_ce <=anc_time_cutoff | death_days_since_ce <= anc_time_cutoff) ~ 2, #did not engraft by 60 days & had either graft failure or die
+                                                                anc_engraftment_day <= anc_time_cutoff  & graft_fail_days_since_ce <=anc_engraftment_day ~ 2, #graft failure before engraftment
+                                                                anc_engraftment_day <= anc_time_cutoff  & death_days_since_ce <=anc_engraftment_day ~ 2, #death before engraftment 
+                                                                anc_engraftment_day <= anc_time_cutoff ~ 1 & anc_engraftment_day >=0, #engraftment within 60 days
+                                                                anc_engraftment_day < 0 ~ 0, #did not engraft by 60 days
+                                                                TRUE ~ NA)) %>% 
+                  mutate(anc_engraftment_day_censored = case_when(anc_engraftment_censored == 0 & last_in_person_visit_since_ce > anc_time_cutoff ~ anc_time_cutoff, #did not engraft by 60 days & had follow-up data
+                                                                    anc_engraftment_censored == 0 & last_in_person_visit_since_ce <= anc_time_cutoff ~ last_in_person_visit_since_ce, #did not engraft by 60 days & had follow-up data
+                                                                    anc_engraftment_censored == 1 ~ anc_engraftment_day, #engraftment within 60 days
+                                                                    anc_engraftment_censored == 2 & death_days_since_ce <= anc_engraftment_day ~ death_days_since_ce, #death before engraftment
+                                                                    anc_engraftment_censored == 2 & death_days_since_ce <= anc_time_cutoff & anc_engraftment_day < 0 ~ death_days_since_ce, #death & never engrafted
+                                                                    anc_engraftment_censored == 2 & graft_fail_days_since_ce <= anc_engraftment_day ~ graft_fail_days_since_ce, #graft failure before engraftment
+                                                                    anc_engraftment_censored == 2 & graft_fail_days_since_ce <= anc_time_cutoff & anc_engraftment_day<0 ~ graft_fail_days_since_ce, #graft failure and never engrafted
+                                                                    TRUE ~ NA)) 
+                  # filter(is.na(anc_engraftment_day_60censored)) %>%
+                  # select(record_id, graft_fail_days_since_ce, death_days_since_ce, anc_engraftment_day, anc_engraftment_60censored, last_in_person_visit_since_ce) %>%
+                  # view()
 
-# Prepare transition matrix
-tmat <- trans.comprisk(2, names = c("event-free", "graft failure", "death"))
+# platelet engraftment dates:
+cohort_covars <- results_tbl("survival_analysis_dataset") %>% collect()
 
-# Run msprep
-pre_ferritin_cox_2$graft_fail <- as.numeric(pre_ferritin_cox_2$graft_fail_5yr == 1)
-pre_ferritin_cox_2$death <- as.numeric(pre_ferritin_cox_2$graft_fail_5yr == 2)
+# incorporated all changes from Nora
+platelet_engraftment <- read.csv("local/platelet_engraftment_dates_final_06052025.csv") #%>%
+      # arrange(record_id) %>% view() 
 
-pre_ferritin_cox_2_long <- msprep(
-  time = c(NA, "graft_fail_days_since_ce_5yr_censored", "graft_fail_days_since_ce_5yr_censored"), 
-  status = c(NA, "graft_fail", "death"), 
-  data = pre_ferritin_cox_2, 
-  keep = c("scd_type", "has_busulfan", "transplant_type_combined", "age_at_ce", "gender", "ferritin_pre"), 
-  trans = tmat)
+platelet_time_cutoff <- 180 #days
+cohort_covars <- cohort_covars %>% 
+                        left_join(platelet_engraftment %>% 
+                        select(record_id, person_id, 
+                        platelet_engraftment_day), by = c("person_id", "record_id")) %>% 
+                        mutate(platelet_engraftment_censored = case_when(platelet_engraftment_day == "Never engrafted" | platelet_engraftment_day >= platelet_time_cutoff ~ 0 , #did not engraft by 180 days
+                                                                        is.na(platelet_engraftment_day) & pmin(graft_fail_days_since_ce, death_days_since_ce, na.rm = TRUE) <= platelet_time_cutoff ~ 2, #competing events within #180 days
+                                                                        is.na(platelet_engraftment_day) & pmin(graft_fail_days_since_ce, death_days_since_ce, last_in_person_visit_since_ce, na.rm = TRUE) > platelet_time_cutoff ~ 0, #censored at end of the study
+                                                                        as.numeric(platelet_engraftment_day) < platelet_time_cutoff ~ 1, #engraftment within 180 days
+                                                                        !is.na(last_in_person_visit_since_ce) ~ 0, 
+                                                                        TRUE ~ NA)) %>%
+                        mutate(platelet_engraftment_day_censored = case_when(platelet_engraftment_censored == 0 ~ pmin(graft_fail_days_since_ce, death_days_since_ce, last_in_person_visit_since_ce, platelet_time_cutoff, as.numeric(platelet_engraftment_day), na.rm = TRUE), 
+                                                                platelet_engraftment_censored == 2 ~  pmin(graft_fail_days_since_ce, death_days_since_ce, na.rm = TRUE), 
+                                                                  platelet_engraftment_censored == 1 ~ as.numeric(platelet_engraftment_day),
+                                                                  TRUE ~ NA)) #%>% 
+                        # select(platelet_engraftment_censored, platelet_engraftment_day_censored,
+                        #       platelet_engraftment_day, death_days_since_ce, graft_fail_days_since_ce, last_in_person_visit_since_ce) %>% view()
+                              
 
-events(pre_ferritin_cox_2_long)
+cohort_covars %>% colnames()
+cohort_covars %>% output_tbl("survival_analysis_dataset")
 
-pre_ferritin_cox_2_long %>% view()
-
-# Run cox model
-pre_ferritin_cox_2_expanded <- expand.covs(pre_ferritin_cox_2_long, "ferritin_pre")
-colnames(pre_ferritin_cox_2_expanded)
-pre_ferritin_cox_2_expanded %>% view()
-c1 <- coxph(Surv(time, status) ~ ferritin_premoderate.1 + ferritin_prehigh.2 +
-                                  ferritin_prehigh.1 + ferritin_prehigh.2 + 
-                                  strata(trans),
-            data = pre_ferritin_cox_2_expanded)
-
-# Visualising cumulative baseline hazards using plot.msfit()
-# Data to predict
-ferritin_low <- data.frame(
-  ferritin_premoderate.1 = c(0, 0, 0, 0),
-  ferritin_premoderate.2 = c(0, 0, 0, 0),
-  ferritin_prehigh.1 = c(0, 0, 0, 0),
-  ferritin_prehigh.2 = c(0, 0, 0, 0),
-  trans = c(1, 2), 
-  strata = c(1, 2)
-)
-
-# Make msfit object
-msf.ferritin_low <- msfit(
-  object = c1, 
-  newdata = ferritin_low, 
-  trans = tmat)
-
-# Plot cumulative baseline hazards
-# different line colors for different strata
-plot(msf.ferritin_low, 
-    type = "single",
-    xlim = c(0, 5*365.25), 
-    col = c("red", "blue"), 
-    lty = c("dashed", "solid"), 
-    legend.pos = "top",
-    lwd = 2,
-    use.ggplot = TRUE,
-    # conf.type = "log", 
-  # conf.int = 0.95
-  ) + # Add title and center
-  ggtitle("Cumulative baseline hazards") +
-  theme(plot.title = element_text(hjust = 0.5))
-
-# Plot cumulative baseline hazards using facet wrap for event types
-
-plot(msf.ferritin_low, 
-    xlim = c(0, 5*365.25), 
-    col = c("red", "blue"), 
-    lty = c("dashed", "solid"), 
-    legend.pos = "top",
-    lwd = 2,
-    use.ggplot = TRUE,
-    type = "separate", #for 2 boxes
-    scale_type = "fixed"
-
-  ) + # Add title and center
-  ggtitle("Cumulative baseline hazards") +
-  theme(plot.title = element_text(hjust = 0.5))
-
-# Filled/stacked plots
-# patient-specific transition probabilities using probtrans(). 
-# we would like to predict from the beginning of follow-up (predt = 0).
-pt.ferritin <- probtrans(msf.ferritin_low, predt = 0)
-
-# Example predict at different times
-summary(pt.ferritin, times = c(1, 5, 10))
-
-# stacked plot 
-plot(pt.ferritin, from = 1)
-
-# reordering the event types to have 1 competing event at the bottom and 1 at the top
-
-plot(pt.ferritin, 
-    use.ggplot = TRUE, # return a ggplot object and put legend outside
-    ord = c(2, 1, 3))
-
-# each event type in one subplot
-par(mfrow = c(1, 3))
-plot(pt.ferritin, 
-    type = "separate",
-    conf.int = 0.95, # 95% level
-  conf.type = "log")
-
-# comparing different ferritin levels
-# 1. Prepare patient data 
-ferritin_low <- data.frame(
-  ferritin_premoderate.1 = c(0, 0, 0, 0),
-  ferritin_premoderate.2 = c(0, 0, 0, 0),
-  ferritin_prehigh.1 = c(0, 0, 0, 0),
-  ferritin_prehigh.2 = c(0, 0, 0, 0),
-  trans = c(1, 2), 
-  strata = c(1, 2)
-)
-
-ferritin_med <- data.frame(
-  ferritin_premoderate.1 = c(1, 0, 0, 0),
-  ferritin_premoderate.2 = c(0, 1, 0, 0),
-  ferritin_prehigh.1 = c(0, 0, 0, 0),
-  ferritin_prehigh.2 = c(0, 0, 0, 0),
-  trans = c(1, 2), 
-  strata = c(1, 2)
-)
-
-ferritin_high <- data.frame(
-  ferritin_premoderate.1 = c(0, 0, 0, 0),
-  ferritin_premoderate.2 = c(0, 0, 0, 0),
-  ferritin_prehigh.1 = c(1, 0, 0, 0),
-  ferritin_prehigh.2 = c(0, 1, 0, 0),
-  trans = c(1, 2), 
-  strata = c(1, 2)
-)
-
-# 2. Make msfit objects
-msf.low <- msfit(c1, ferritin_low, trans = tmat)
-msf.med <- msfit(c1, ferritin_med, trans = tmat)
-msf.high <- msfit(c1, ferritin_high, trans = tmat)
-
-
-# 3. Make probtrans objects
-pt.low <- probtrans(msf.low, predt = 0)
-pt.med <- probtrans(msf.med, predt = 0)
-pt.high <- probtrans(msf.high, predt = 0)
-
-
-vis.multiple.pt(
-  x = list(pt.low, pt.med, pt.high), 
-  from = 1,
-  to = 2, 
-  # conf.type = "log",
-  cols = c("red", "green", "blue"),
-  labels = c("low", "moderate", "high"),
-  legend.title = "Pre-transplant ferritin",
-  ylab = "Probability of graft failure"
-)
-
-vis.multiple.pt(
-  x = list(pt.low, pt.med, pt.high), 
-  from = 1,
-  to = 3, 
-  # conf.type = "log",
-  cols = c("red", "green", "blue"),
-  labels = c("low", "moderate", "high"),
-  legend.title = "Pre-transplant ferritin",
-  ylab = "Probability of death without graft failure"
-)
-
-## another way
-pt.f_low <- probtrans(msf.f_low, predt = 0)[[1]]
-idx1 <- (pt.f_low$time < 5)
-
-pt.f_moderate <- probtrans(msf.f_moderate, predt = 0)[[1]]
-idx2 <- (pt.f_moderate$time < 5)
-
-plot(c(0, pt.f_low$time[idx1]), c(0, pt.f_low$pstate2[idx1]), type = "s",
-        # type = "single",
-        ylim = c(0, 0.5), xlab = "Years from transplant", ylab = "Probability of graft failure",
-        lwd = 2, use.ggplot = TRUE) 
-lines(c(0, pt.f_moderate$time[idx2]), c(0, pt.f_moderate$pstate2[idx2]), type = "s", 
-      lwd = 2, col = 2)
-title(main = "AIDS")
+cohort_covars %>% view()

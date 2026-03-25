@@ -7,13 +7,13 @@
 .DS_STore?  
 **/results/**/*.csv
 **/results/**/*.log
+**/reporting/*.html
 **/local/**
 *.zip
 **/manuscript/**
 *.nb.html
 *.pdf
 *.html
-*.md
 *.gpg
 .#*
 .Rproj.user
@@ -22,4 +22,5 @@
 **/Levon/**
 *.code-workspace*
 *.json
-
+**/manuscript/**
+**/docs/**
